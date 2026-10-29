@@ -1,0 +1,35 @@
+{
+  "name": "@cms/publisher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Delivers publish events to the public site: drains the revalidation outbox into signed webhooks with retries, and fires scheduled publishes exactly once.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cms/db": "workspace:*",
+    "@cms/shared": "workspace:*",
+    "ioredis": "^5.4.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cms/config": "workspace:*",
+    "@types/node": "^20.17.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

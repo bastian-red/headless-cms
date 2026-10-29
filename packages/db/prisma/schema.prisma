@@ -1,0 +1,41 @@
+// headless-cms schema.
+//
+// Build step 1 (scaffold) declares only the people who sign in to the studio.
+// Posts, immutable revisions, tags, comments, media, API keys and the
+// revalidation outbox arrive in build step 2.
+//
+// `prisma migrate dev` is `--create-only` in package.json, so a generated
+// migration is reviewed before it is applied: from step 2 on, the full-text
+// search column and its GIN index are hand-written SQL that a regenerated
+// migration would otherwise try to drop.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Who may do what is `PERMISSIONS` in @cms/shared; the spelling here is the
+/// spelling there, so a role read from a row needs no mapping.
+enum Role {
+  AUTHOR
+  EDITOR
+  ADMIN
+}
+
+/// A person who writes, edits or administers. There is no public sign-up: an
+/// account exists because the seed or an admin created it.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique(map: "users_email_key")
+  name         String
+  role         Role     @default(AUTHOR)
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("users")
+}
