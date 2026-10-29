@@ -23,6 +23,8 @@
     "env:contract:self-test": "node scripts/env-contract.mjs --self-test",
     "scan:invisible": "node scripts/invisible-chars.mjs",
     "scan:invisible:self-test": "node scripts/invisible-chars.mjs --self-test",
+    "scan:self-import": "node scripts/self-import.mjs",
+    "scan:self-import:self-test": "node scripts/self-import.mjs --self-test",
     "scan:secrets": "gitleaks detect --no-banner --redact --config .gitleaks.toml",
     "format": "prettier --write \"**/*.{ts,tsx,js,cjs,mjs,json,md}\"",
     "prepare": "node scripts/install-hooks.mjs"

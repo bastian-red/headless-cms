@@ -44,6 +44,8 @@ jobs:
       - run: pnpm env:contract
       - run: pnpm scan:invisible:self-test
       - run: pnpm scan:invisible
+      - run: pnpm scan:self-import:self-test
+      - run: pnpm scan:self-import
       - name: Install gitleaks
         shell: bash
         run: |

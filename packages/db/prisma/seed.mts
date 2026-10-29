@@ -18,8 +18,12 @@
  *
  * These are local accounts for a local database, published on purpose so the
  * README's sign-in and `scripts/dev-smoke.sh` work on a fresh clone.
+ *
+ * The client comes from this package's own source, not from `@cms/db`: a
+ * package importing itself resolves to its `dist/`, which a clean checkout has
+ * not built (turbo's `^build` covers dependencies, never the package itself).
  */
-import { createPrismaClient } from '@cms/db';
+import { createPrismaClient } from '../src/client.ts';
 import { hashPassword } from '@cms/shared/server';
 
 const ADMIN_EMAIL = 'ines@quire.test';

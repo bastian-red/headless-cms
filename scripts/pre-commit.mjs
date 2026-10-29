@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pre-commit gate. Four checks, all mandatory, none skippable with --no-verify
+ * Pre-commit gate. Five checks, all mandatory, none skippable with --no-verify
  * without also skipping the others:
  *
  *   1. gitleaks protect --staged  — secret detection is deterministic work, so it
@@ -12,7 +12,10 @@
  *   3. invisible-chars.mjs        — a character you cannot see is a bug you cannot
  *      review. Same reasoning: it turns an unreadable test failure into a named
  *      line and column.
- *   4. pnpm test                  — the gate lane only (fast, no network, no DB).
+ *   4. self-import.mjs            — a package importing itself by name resolves
+ *      to its own dist/, which works on any machine that has built once and
+ *      fails on a clean checkout. Only CI would see it otherwise.
+ *   5. pnpm test                  — the gate lane only (fast, no network, no DB).
  *
  * Integration, load and E2E are deliberately NOT here: they need Postgres,
  * Redis, four running processes and browsers. Running them on every commit
@@ -56,6 +59,18 @@ const steps = [
     name: 'invisible characters',
     cmd: 'node',
     args: ['scripts/invisible-chars.mjs'],
+    required: true,
+  },
+  {
+    name: 'self-imports (self-test)',
+    cmd: 'node',
+    args: ['scripts/self-import.mjs', '--self-test'],
+    required: true,
+  },
+  {
+    name: 'self-imports',
+    cmd: 'node',
+    args: ['scripts/self-import.mjs'],
     required: true,
   },
   {
