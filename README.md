@@ -8,11 +8,11 @@ revalidated by tag the moment a publish lands, with no rebuild. A versioned cont
 same published content to any other frontend, and the public site reads through it like any other
 client. Nothing unpublished may ever reach a page, a feed, a sitemap or a search result.
 
-> **Status: build step 2 of 11, the content model.** Sign-in, the three roles, the API, the
+> **Status: build step 3 of 11, the markdown renderer.** Sign-in, the three roles, the API, the
 > publisher process, health and status, every test lane and CI are in place, and so are the content
-> schema and a seeded demo publication of forty posts. The markdown pipeline, the content API,
-> search, the rendering matrix, SEO, comments, the studio editor and the visual identity arrive in
-> the following steps. This README is rewritten as each one lands (demo GIF included at
+> schema, a seeded demo publication of forty posts and the one sanitizing markdown renderer. The
+> content API, search, the rendering matrix, SEO, comments, the studio editor and the visual
+> identity arrive in the following steps. This README is rewritten as each one lands (demo GIF included at
 > the end); nothing below describes a feature that is not in the code.
 
 ```mermaid
@@ -93,6 +93,44 @@ erDiagram
   `./scripts/seed-check.sh` seeds twice and fails unless both runs digest identically, no canary is
   in any row the public site may read, and every internal link in a live post resolves.
 
+## One markdown renderer
+
+`packages/markdown` is the only code that turns markdown into anything. The studio preview, the post
+page, the RSS feed and the search index all call its `render()`, so an editor previews exactly what
+a reader and a feed reader get.
+
+```
+source ─ remark-parse + GFM ─ headings shifted below the page's h1 ─ remark-rehype ─┐
+         (raw HTML dropped here, never escaped into the page)                       │
+  ┌─────────────────────────────────────────────────────────────────────────────────┘
+  └ rehype-sanitize (GitHub's schema, narrowed) ─ heading ids, footnote links, lazy images
+    ─ audit: an independent walk that throws on any unsafe node ─ tree
+         ├─ toReact()    page and studio preview: React elements, no innerHTML anywhere
+         ├─ renderHtml() RSS (with absolute URLs)
+         └─ text         search index
+```
+
+- **Sanitized, then audited.** `rehype-sanitize` removes everything outside the policy, and a
+  separate audit (`src/audit.ts`, which reads URLs the way a browser does, control characters and
+  tabs included) refuses the tree if anything got through. A pipeline that lost its sanitizer
+  fails to render instead of serving script; a test proves it.
+- **Tested against what a browser would parse.** 46 hostile vectors (raw script, `onerror`,
+  `javascript:` with mixed case, entities, tabs and control characters, reference links, attribute
+  break-outs, mutation-XSS shapes) plus a property test over random hostile markdown. Each output
+  is re-parsed by parse5 and must hold nothing executable and give back exactly the tree that was
+  serialized. The seeded hostile post renders to a reviewed snapshot.
+- **The same document everywhere.** For every seeded post and every vector, the React path and the
+  HTML path parse to the same document. That check found a real difference (`data-footnotes`
+  rendered as `="true"` by React and bare by the HTML serializer), now settled in the renderer.
+- **No DOM clobbering.** An element id becomes a property of `window`. Heading ids come from the
+  shared `slugify` (`[a-z0-9-]`, so `## __next_f` gets `next-f`), and footnote ids carry the
+  sanitizer's `user-content-` prefix exactly once, so footnote links work with no script.
+- **A time limit on save.** The parser is not linear on every input. Measured: 16,000 characters
+  of alternating emphasis take 8 s, 400 nested list levels take 4.8 s, and 8,000 nested quotes
+  overflow the stack. `@cms/markdown/server` renders a body in a worker thread with a 2 s
+  deadline and terminates it on overrun. From step 4 the API refuses to save a body that fails,
+  so pages only ever render bodies that finished in time.
+
 ## Running it
 
 Requires Node 20+, pnpm 9 and Docker.
@@ -125,7 +163,7 @@ so without the wrapper the API would boot with no secret.
 
 | Lane | Command | What it proves |
 |---|---|---|
-| Gate (every commit) | `pnpm test` | Contracts, role matrix, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML` |
+| Gate (every commit) | `pnpm test` | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML` |
 | Environment contract | `pnpm env:contract` | Source, `.env.example` and `turbo.json` agree in all four directions |
 | Seed check | `./scripts/seed-check.sh` | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row, every internal link in a live post resolves |
 | Integration | `./scripts/integration.sh` | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race), then the real Nest graph on Postgres and Redis at the documented budgets: sign-in, default-closed guard, role read from the database, the sign-in budget limiting sign-in only |
@@ -148,6 +186,7 @@ document.
 apps/web            Next.js 16: the public site and the studio
 apps/api            NestJS: auth, health, status (content API from step 4)
 services/publisher  publish delivery and scheduling (health only until step 7)
+packages/markdown   the one renderer: parse, sanitize, audit; React, HTML and text out
 packages/db         Prisma schema, migrations, the seeded publication, schema tests
 packages/shared     zod contracts, roles, error vocabulary, service tokens
 packages/config     shared tsconfig

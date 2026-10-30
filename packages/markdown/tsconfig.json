@@ -1,0 +1,24 @@
+{
+  // ESM, unlike every other package here. The unified ecosystem (remark, rehype,
+  // hast utilities) ships ESM only, and a CommonJS emit would `require()` it.
+  // Node 20.19 can do that, but it is the runtime path the base config warns
+  // about: it fails in a running server, not in CI. Consumers load this package
+  // as ESM instead: Next bundles it, and the CommonJS Nest app reaches it with
+  // `await import('@cms/markdown')`, which TypeScript's Node16 emit leaves alone.
+  //
+  // `DOM` for `URL`, and `types` empty so `node:` modules do not resolve: the
+  // studio preview runs this in the browser. The two server-only files
+  // (server.ts, worker.ts) bring their own reference to Node's types.
+  "extends": "@cms/config/tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "types": [],
+    "jsx": "react-jsx",
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/fixtures"]
+}

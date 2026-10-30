@@ -54,6 +54,12 @@
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]
     },
+    // The render check spawns dist/worker.js, so its test needs this package
+    // built, not only its dependencies.
+    "@cms/markdown#test": {
+      "dependsOn": ["^build", "build"],
+      "outputs": ["coverage/**"]
+    },
     "test:integration": {
       "dependsOn": ["^build"],
       "cache": false

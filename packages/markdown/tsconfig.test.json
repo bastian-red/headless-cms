@@ -1,0 +1,14 @@
+{
+  // The tests are typechecked too: vitest transpiles without checking, so a test
+  // against a renamed export would otherwise stay green. See packages/shared.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"],
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/**/*.test.ts", "src/fixtures/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

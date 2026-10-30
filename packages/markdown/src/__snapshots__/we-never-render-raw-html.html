@@ -1,0 +1,14 @@
+<p>Markdown allows raw HTML. That is convenient for authors and dangerous for readers, because HTML can carry a script, and a script on our page can do anything our page can do.</p>
+<h2 id="what-we-do-with-it">What we do with it</h2>
+<p>Our renderer parses markdown into a tree, removes every element and attribute that is not on a short list, and only then turns the tree into the page. Raw HTML in the source is dropped. Links are kept only when they point somewhere a link should: web addresses, mail addresses, and pages on this site. Event handler attributes never survive.</p>
+<p>The same cleaning runs for the studio preview, the page and the feed, because they share one pipeline.</p>
+<h2 id="a-demonstration">A demonstration</h2>
+<p>The lines below this paragraph are hostile on purpose. In the source of this post they are a script tag, an image whose error handler runs code, and a link whose address is code. On the page you are reading, they should be gone or inert. If you see an alert, or anything in this section other than plain text and one harmless link, something is broken and we would like to hear about it.</p>
+<p><a>A link that tries to run code</a></p>
+<h2 id="how-we-know">How we know</h2>
+<p>Our tests render hostile fixtures through the pipeline and check the output contains no script, no handler and no unsafe address. The end-to-end tests load this very page in two browsers and check that nothing on it ran.</p>
+<pre><code class="language-html">&#x3C;!-- Shown as text, never run: -->
+&#x3C;script>
+  alert('this is a code sample');
+&#x3C;/script>
+</code></pre>
