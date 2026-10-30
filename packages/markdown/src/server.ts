@@ -33,6 +33,14 @@ export type RenderCheck =
 
 const WORKER = new URL('./worker.js', import.meta.url);
 
+/**
+ * Starting a thread and loading the parser is not the body's fault, so it has
+ * its own, generous limit. The render deadline starts when the worker says it
+ * is ready; before that change a 170 ms render missed a 2 s deadline on a busy
+ * machine because thread start-up was counted against it.
+ */
+export const STARTUP_LIMIT_MS = 15_000;
+
 export function checkRenderable(
   markdown: string,
   { timeoutMs = RENDER_BUDGET_MS }: { timeoutMs?: number } = {},
@@ -54,14 +62,27 @@ export function checkRenderable(
       void worker.terminate();
       resolve(result);
     };
-    const timer = setTimeout(() => {
+    let timer = setTimeout(() => {
       settle({
         ok: false,
-        reason: 'timeout',
-        detail: `did not render within ${String(timeoutMs)} ms`,
+        reason: 'crash',
+        detail: `worker did not start within ${String(STARTUP_LIMIT_MS)} ms`,
       });
-    }, timeoutMs);
-    worker.once('message', (message: RenderCheck) => settle(message));
+    }, STARTUP_LIMIT_MS);
+    worker.on('message', (message: RenderCheck | { ready: true }) => {
+      if (!('ready' in message)) {
+        settle(message);
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        settle({
+          ok: false,
+          reason: 'timeout',
+          detail: `did not render within ${String(timeoutMs)} ms`,
+        });
+      }, timeoutMs);
+    });
     worker.once('error', (error) =>
       settle({ ok: false, reason: 'crash', detail: `${error.name}: ${error.message}` }),
     );

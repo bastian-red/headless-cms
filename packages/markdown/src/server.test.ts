@@ -52,7 +52,14 @@ describe('checkRenderable', () => {
     const result = await checkRenderable(body, { timeoutMs: 500 });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(['timeout', 'crash']).toContain(result.reason);
-    expect(performance.now() - started).toBeLessThan(1500);
+    // Thread start-up plus the deadline; far below the seconds these take to finish.
+    expect(performance.now() - started).toBeLessThan(3500);
+  });
+
+  it('does not count thread start-up against the body', async () => {
+    // A deadline shorter than starting a worker and loading the parser
+    // (about 500 ms here), for a body that renders in a few milliseconds.
+    expect(await checkRenderable('A short body.', { timeoutMs: 100 })).toMatchObject({ ok: true });
   });
 
   it('runs checks side by side without one stalling another', async () => {
