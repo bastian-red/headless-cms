@@ -8,10 +8,11 @@ revalidated by tag the moment a publish lands, with no rebuild. A versioned cont
 same published content to any other frontend, and the public site reads through it like any other
 client. Nothing unpublished may ever reach a page, a feed, a sitemap or a search result.
 
-> **Status: build step 1 of 11, the scaffold.** Sign-in, the three roles, the API, the publisher
-> process, health and status, every test lane and CI are in place. Posts, revisions, the markdown
-> pipeline, search, the rendering matrix, SEO, comments, the studio editor and the visual identity
-> arrive in the following steps. This README is rewritten as each one lands (demo GIF included at
+> **Status: build step 2 of 11, the content model.** Sign-in, the three roles, the API, the
+> publisher process, health and status, every test lane and CI are in place, and so are the content
+> schema and a seeded demo publication of forty posts. The markdown pipeline, the content API,
+> search, the rendering matrix, SEO, comments, the studio editor and the visual identity arrive in
+> the following steps. This README is rewritten as each one lands (demo GIF included at
 > the end); nothing below describes a feature that is not in the code.
 
 ```mermaid
@@ -56,6 +57,42 @@ the same API an outside client would use.
   request. That is the failure a single `cookies()` call in a shared layout causes, and no
   content-level test would notice it.
 
+## The content model
+
+Content is data, not pages. A **post** is an identity: its slug, its workflow state and two pointers.
+Everything a reader sees lives in a **revision**, and revisions are immutable.
+
+```mermaid
+erDiagram
+  posts ||--o{ revisions : "has, in order (1, 2, 3...)"
+  posts |o--o| revisions : "head: what the studio edits"
+  posts |o--o| revisions : "published: what readers see"
+  revisions }o--o{ tags : "revision_tags"
+  posts ||--o{ slug_redirects : "old slugs, 308"
+  posts ||--o{ comments : "PENDING until approved"
+  revisions }o--o| media : cover
+```
+
+- **Readers see the published revision, never the newest one.** A live post being edited is in
+  `DRAFT` while readers keep reading the old revision. Tags hang off the revision, so retagging a
+  draft cannot change a public tag page before the draft is published.
+- **The database enforces the rules, not only the API.** Each of these is a constraint or trigger,
+  and `packages/db/test/schema.test.ts` attempts every forbidden write against a real Postgres and
+  asserts it is refused by name:
+  - a revision cannot be updated, and cannot be deleted while its post exists;
+  - a post's head and published revisions, and a revision's parent, must belong to that post;
+  - `PUBLISHED` means the head is live, `UNPUBLISHED` means nothing is, `DRAFT` / `IN_REVIEW` /
+    `SCHEDULED` mean there is pending work, and a scheduled time exists exactly when scheduled;
+  - two saves from the same base cannot both become revision n+1;
+  - a redirect can never shadow a live slug, from either side, even when the two writes race (an
+    advisory lock per slug; the test proves the second writer waited);
+  - slug format and every length limit, with the numbers pinned to `@cms/shared` by a gate test.
+- **The seed is a fixture, and it is checked.** Forty posts in every workflow state (one of them
+  3,400 words), history, a renamed post with its redirect, a deliberately hostile post, and comments
+  in every moderation state. Every row readers must never see carries a canary word.
+  `./scripts/seed-check.sh` seeds twice and fails unless both runs digest identically, no canary is
+  in any row the public site may read, and every internal link in a live post resolves.
+
 ## Running it
 
 Requires Node 20+, pnpm 9 and Docker.
@@ -90,7 +127,8 @@ so without the wrapper the API would boot with no secret.
 |---|---|---|
 | Gate (every commit) | `pnpm test` | Contracts, role matrix, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML` |
 | Environment contract | `pnpm env:contract` | Source, `.env.example` and `turbo.json` agree in all four directions |
-| Integration | `./scripts/integration.sh` | The real Nest graph on Postgres and Redis at the documented budgets: sign-in, default-closed guard, role read from the database, the sign-in budget limiting sign-in only |
+| Seed check | `./scripts/seed-check.sh` | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row, every internal link in a live post resolves |
+| Integration | `./scripts/integration.sh` | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race), then the real Nest graph on Postgres and Redis at the documented budgets: sign-in, default-closed guard, role read from the database, the sign-in budget limiting sign-in only |
 | E2E | `./scripts/e2e.sh` | Production build, the rendering matrix, Chromium and Firefox: sign-in per role, deep links, open-redirect refusal, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px |
 | Dev smoke | `./scripts/dev-smoke.sh` | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves a studio that read the editor from Postgres |
 
@@ -110,7 +148,7 @@ document.
 apps/web            Next.js 16: the public site and the studio
 apps/api            NestJS: auth, health, status (content API from step 4)
 services/publisher  publish delivery and scheduling (health only until step 7)
-packages/db         Prisma schema, migrations, seed
+packages/db         Prisma schema, migrations, the seeded publication, schema tests
 packages/shared     zod contracts, roles, error vocabulary, service tokens
 packages/config     shared tsconfig
 infra/              docker-compose and one Dockerfile per process

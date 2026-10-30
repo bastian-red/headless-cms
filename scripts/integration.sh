@@ -4,7 +4,7 @@
 # suite.
 #
 #   ./scripts/integration.sh              # everything
-#   ./scripts/integration.sh auth         # only API suite files matching "auth"
+#   ./scripts/integration.sh auth         # the database suite, then API files matching "auth"
 #
 # Its own database (cms_it) and Redis database (1), so it never touches what
 # `pnpm dev` is using. Every budget is the DOCUMENTED one from .env.example:
@@ -48,6 +48,9 @@ pnpm --filter @cms/api exec node -e "
 "
 pnpm --filter @cms/db exec prisma migrate deploy >/dev/null
 node scripts/db-drift.mjs
+
+echo "integration: database guarantees"
+pnpm --filter @cms/db exec vitest run --config vitest.integration.config.ts
 
 echo "integration: API"
 if [[ $# -gt 0 ]]; then

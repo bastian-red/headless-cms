@@ -7,15 +7,18 @@
  * runs `prisma migrate diff` from the live database to the datamodel instead.
  *
  * What the diff cannot see is the hand-written half, which Prisma proposes to
- * drop: every object named in `RAW` below. Those statements are expected and
- * filtered; every other difference is real drift. Empty in the scaffold; the
- * full-text search column and its GIN index join it in build step 2.
+ * drop: the composite foreign keys. Those statements are expected and
+ * filtered; every other difference is real drift. The list is
+ * HAND_WRITTEN_DIFF_OBJECTS in packages/db/src/constraints.ts, read from the
+ * built package (db-drift.sh and integration.sh build it first), so the names
+ * live in one place and constraints.test.ts proves each is in a migration.
  *
  *   node scripts/db-drift.mjs     (DATABASE_URL)
  *
  * 0 = matches. 1 = drift, with the SQL that would close it. 2 = could not run.
  */
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,11 +56,19 @@ try {
   process.exit(2);
 }
 
-/** Hand-written objects Prisma cannot express. None yet. */
-const RAW = /(?!)/u;
+const { HAND_WRITTEN_DIFF_OBJECTS } = createRequire(import.meta.url)(
+  join(dbPackage, 'dist', 'constraints.js'),
+);
+if (!Array.isArray(HAND_WRITTEN_DIFF_OBJECTS) || HAND_WRITTEN_DIFF_OBJECTS.length === 0) {
+  console.error('db-drift: could not read HAND_WRITTEN_DIFF_OBJECTS from packages/db/dist.');
+  process.exit(2);
+}
+/** A diff block naming a hand-written object, quoted exactly as Prisma prints it. */
+const isHandWritten = (block) =>
+  HAND_WRITTEN_DIFF_OBJECTS.some((name) => block.includes(`"${name}"`));
 const real = diff
   .split(/\n(?=-- )/u)
-  .filter((block) => !RAW.test(block))
+  .filter((block) => !isHandWritten(block))
   .join('\n')
   .trim();
 if (real !== '' && !/this is an empty migration/iu.test(real)) {

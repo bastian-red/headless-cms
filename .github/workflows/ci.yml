@@ -84,7 +84,7 @@ jobs:
           TZ: Pacific/Kiritimati
 
   integration:
-    name: Integration (real Nest graph, Postgres, Redis, documented budgets)
+    name: Integration (schema guarantees, seed check, real Nest graph, Postgres, Redis, documented budgets)
     runs-on: ubuntu-24.04
     env:
       AUTH_SECRET: ci-secret-at-least-32-characters-long
@@ -118,7 +118,8 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm db:deploy
       - run: ./scripts/db-drift.sh
-      - run: pnpm db:seed
+      # Seeds twice and digests both runs, then checks no canary is public.
+      - run: ./scripts/seed-check.sh
       - run: ./scripts/integration.sh
 
   dev-smoke:

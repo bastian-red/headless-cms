@@ -1,13 +1,25 @@
 // headless-cms schema.
 //
-// Build step 1 (scaffold) declares only the people who sign in to the studio.
-// Posts, immutable revisions, tags, comments, media, API keys and the
-// revalidation outbox arrive in build step 2.
+// Content is data, not pages: a post is an identity (slug, workflow state,
+// pointers), and everything a reader sees lives in an immutable revision. Tags
+// hang off the REVISION, not the post, so retagging a draft cannot change a
+// public tag page before the draft is published.
+//
+// Prisma cannot express everything the content model promises, so part of it
+// is hand-written SQL in the migrations, each object named and listed in
+// `scripts/db-drift.mjs` so the drift check knows it is meant to be there:
+//
+//   - CHECK constraints: slug format, length limits (equal to LIMITS in
+//     @cms/shared, held by content.test.ts), and the post state rules.
+//   - Composite foreign keys that keep a post's head and published revisions,
+//     and a revision's parent, inside the same post.
+//   - Triggers: revisions are immutable (no UPDATE; DELETE only by cascade
+//     from their post), and a redirect slug can never shadow a live slug.
+//   - Partial indexes for the moderation queue and the undelivered outbox.
 //
 // `prisma migrate dev` is `--create-only` in package.json, so a generated
-// migration is reviewed before it is applied: from step 2 on, the full-text
-// search column and its GIN index are hand-written SQL that a regenerated
-// migration would otherwise try to drop.
+// migration is reviewed before it is applied: a regenerated one would try to
+// drop the composite foreign keys above.
 
 generator client {
   provider = "prisma-client-js"
@@ -37,5 +49,222 @@ model User {
   passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
+  posts       Post[]     @relation("PostAuthor")
+  revisions   Revision[] @relation("RevisionAuthor")
+  moderations Comment[]  @relation("CommentModerator")
+  media       Media[]
+  apiKeys     ApiKey[]
+
   @@map("users")
+}
+
+/// See POST_STATUSES in @cms/shared for what each state means.
+enum PostStatus {
+  DRAFT
+  IN_REVIEW
+  SCHEDULED
+  PUBLISHED
+  UNPUBLISHED
+}
+
+enum CommentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SPAM
+}
+
+/// A post's identity and workflow state. Readers see `published`; the studio
+/// edits on top of `head`. A post is live exactly when `publishedRevisionId`
+/// is set.
+///
+/// `headRevisionId` is nullable only because a post and its first revision
+/// reference each other; both are written in one transaction, and the seed
+/// check asserts no post is left without a head.
+model Post {
+  id                  String     @id @default(cuid())
+  slug                String     @unique(map: "posts_slug_key")
+  status              PostStatus @default(DRAFT)
+  authorId            String     @map("author_id")
+  headRevisionId      String?    @unique(map: "posts_head_revision_id_key") @map("head_revision_id")
+  publishedRevisionId String?    @unique(map: "posts_published_revision_id_key") @map("published_revision_id")
+  /// First time the post went live; kept across unpublish and republish, so a
+  /// feed never re-dates an old post.
+  publishedAt         DateTime?  @map("published_at") @db.Timestamptz(3)
+  scheduledFor        DateTime?  @map("scheduled_for") @db.Timestamptz(3)
+  createdAt           DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  author    User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "posts_author_id_fkey")
+  head      Revision?      @relation("PostHead", fields: [headRevisionId], references: [id], onDelete: Restrict, map: "posts_head_revision_id_fkey")
+  published Revision?      @relation("PostPublished", fields: [publishedRevisionId], references: [id], onDelete: Restrict, map: "posts_published_revision_id_fkey")
+  revisions Revision[]     @relation("PostRevisions")
+  redirects SlugRedirect[]
+  comments  Comment[]
+
+  @@index([authorId], map: "posts_author_id_idx")
+  /// The public listing: live posts, newest first.
+  @@index([publishedAt(sort: Desc)], map: "posts_published_at_idx")
+  @@map("posts")
+}
+
+/// One saved version of a post. Immutable: a database trigger refuses UPDATE,
+/// and refuses DELETE unless the post itself is being deleted. Restoring an
+/// old version writes a NEW revision with `restoredFromId` set.
+model Revision {
+  id               String   @id @default(cuid())
+  postId           String   @map("post_id")
+  /// 1, 2, 3... per post. Unique with the post, so two saves from the same
+  /// base cannot both become revision n+1.
+  number           Int
+  /// The revision this one was written on top of (null for the first).
+  parentRevisionId String?  @map("parent_revision_id")
+  restoredFromId   String?  @map("restored_from_id")
+  authorId         String   @map("author_id")
+  title            String
+  excerpt          String
+  /// Markdown source. Rendering is @cms/markdown's job, never stored HTML.
+  body             String
+  seoTitle         String?  @map("seo_title")
+  seoDescription   String?  @map("seo_description")
+  coverMediaId     String?  @map("cover_media_id")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  post         Post          @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade, map: "revisions_post_id_fkey")
+  parent       Revision?     @relation("RevisionParent", fields: [parentRevisionId], references: [id], onDelete: NoAction, map: "revisions_parent_revision_id_fkey")
+  children     Revision[]    @relation("RevisionParent")
+  restoredFrom Revision?     @relation("RevisionRestore", fields: [restoredFromId], references: [id], onDelete: NoAction, map: "revisions_restored_from_id_fkey")
+  restores     Revision[]    @relation("RevisionRestore")
+  author       User          @relation("RevisionAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "revisions_author_id_fkey")
+  cover        Media?        @relation(fields: [coverMediaId], references: [id], onDelete: Restrict, map: "revisions_cover_media_id_fkey")
+  tags         RevisionTag[]
+  headOf       Post?         @relation("PostHead")
+  publishedOf  Post?         @relation("PostPublished")
+
+  @@unique([postId, number], map: "revisions_post_id_number_key")
+  /// The target of the same-post composite foreign keys (hand-written SQL).
+  @@unique([id, postId], map: "revisions_id_post_id_key")
+  @@index([authorId], map: "revisions_author_id_idx")
+  @@index([parentRevisionId], map: "revisions_parent_revision_id_idx")
+  @@index([restoredFromId], map: "revisions_restored_from_id_idx")
+  @@index([coverMediaId], map: "revisions_cover_media_id_idx")
+  @@map("revisions")
+}
+
+/// A flat taxonomy: one level, no parents. A blog's tags are facets a reader
+/// browses by, and a hierarchy would ask editors to decide where each one sits.
+model Tag {
+  id          String  @id @default(cuid())
+  slug        String  @unique(map: "tags_slug_key")
+  name        String  @unique(map: "tags_name_key")
+  description String?
+
+  revisions RevisionTag[]
+
+  @@map("tags")
+}
+
+model RevisionTag {
+  revisionId String @map("revision_id")
+  tagId      String @map("tag_id")
+
+  revision Revision @relation(fields: [revisionId], references: [id], onDelete: Cascade, map: "revision_tags_revision_id_fkey")
+  tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Restrict, map: "revision_tags_tag_id_fkey")
+
+  @@id([revisionId, tagId], map: "revision_tags_pkey")
+  /// Tag page: which revisions carry this tag.
+  @@index([tagId], map: "revision_tags_tag_id_idx")
+  @@map("revision_tags")
+}
+
+/// An old slug that answers with a 308 to the post's current one. A trigger
+/// refuses a redirect whose slug is some post's live slug, in both directions.
+model SlugRedirect {
+  fromSlug  String   @id(map: "slug_redirects_pkey") @map("from_slug")
+  postId    String   @map("post_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade, map: "slug_redirects_post_id_fkey")
+
+  @@index([postId], map: "slug_redirects_post_id_idx")
+  @@map("slug_redirects")
+}
+
+/// A reader's comment: a name, a body, no account. Starts PENDING; only
+/// APPROVED is ever rendered. The address is kept only as a keyed hash, for
+/// rate limiting and spam patterns, never in the clear.
+model Comment {
+  id            String        @id @default(cuid())
+  postId        String        @map("post_id")
+  name          String
+  body          String
+  status        CommentStatus @default(PENDING)
+  ipHash        String        @map("ip_hash")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  moderatedAt   DateTime?     @map("moderated_at") @db.Timestamptz(3)
+  moderatedById String?       @map("moderated_by_id")
+
+  post        Post  @relation(fields: [postId], references: [id], onDelete: Cascade, map: "comments_post_id_fkey")
+  moderatedBy User? @relation("CommentModerator", fields: [moderatedById], references: [id], onDelete: SetNull, map: "comments_moderated_by_id_fkey")
+
+  /// The public block under a post: approved, oldest first.
+  @@index([postId, status, createdAt], map: "comments_post_id_status_created_at_idx")
+  @@index([moderatedById], map: "comments_moderated_by_id_idx")
+  @@map("comments")
+}
+
+/// An uploaded image, stored on a volume under its content hash, so the same
+/// bytes uploaded twice are one file and one row.
+model Media {
+  id           String   @id @default(cuid())
+  sha256       String   @unique(map: "media_sha256_key")
+  mimeType     String   @map("mime_type")
+  bytes        Int
+  width        Int
+  height       Int
+  /// Required: an image without a text alternative is not publishable.
+  alt          String
+  uploadedById String   @map("uploaded_by_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  uploadedBy User       @relation(fields: [uploadedById], references: [id], onDelete: Restrict, map: "media_uploaded_by_id_fkey")
+  covers     Revision[]
+
+  @@index([uploadedById], map: "media_uploaded_by_id_idx")
+  @@map("media")
+}
+
+/// A read key for the content API. Only a SHA-256 of the key is stored; the
+/// key itself is shown once, at creation. `prefix` is its first characters,
+/// shown in the studio so a person can tell keys apart.
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  prefix      String    @unique(map: "api_keys_prefix_key")
+  keyHash     String    @unique(map: "api_keys_key_hash_key") @map("key_hash")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(3)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "api_keys_created_by_id_fkey")
+
+  @@index([createdById], map: "api_keys_created_by_id_idx")
+  @@map("api_keys")
+}
+
+/// The transactional outbox. A publish writes its row here in the same
+/// transaction as the post change; the publisher delivers it to the web tier
+/// (`POST /api/revalidate`) and marks it delivered. The id is the webhook's
+/// idempotency key.
+model RevalidationEvent {
+  id            String    @id @default(cuid())
+  tags          String[]
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  deliveredAt   DateTime? @map("delivered_at") @db.Timestamptz(3)
+  lastError     String?   @map("last_error")
+
+  @@map("revalidation_events")
 }

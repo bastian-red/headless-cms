@@ -19,6 +19,7 @@
     "db:deploy": "./scripts/with-env.sh turbo run migrate:deploy --filter=@cms/db",
     "db:seed": "./scripts/with-env.sh turbo run seed --filter=@cms/db",
     "db:drift": "./scripts/db-drift.sh",
+    "db:seed-check": "./scripts/seed-check.sh",
     "env:contract": "node scripts/env-contract.mjs",
     "env:contract:self-test": "node scripts/env-contract.mjs --self-test",
     "scan:invisible": "node scripts/invisible-chars.mjs",
