@@ -89,4 +89,11 @@ else
   pnpm --filter @cms/api exec vitest run --config vitest.integration.config.ts
 fi
 leftovers "search and API" "$before" "$(count_posts)"
+
+# Last: these tests mark every undelivered event in cms_it delivered so each
+# one owns the outbox it drains, and the API suites above leave events behind.
+echo "integration: publisher (scheduling, outbox delivery)"
+before=$(count_posts)
+pnpm --filter @cms/publisher exec vitest run --config vitest.integration.config.ts
+leftovers publisher "$before" "$(count_posts)"
 echo "integration: no posts left behind ($before)"

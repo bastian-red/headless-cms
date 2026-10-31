@@ -7,8 +7,7 @@
  *   server which closed the socket answers a liveness check perfectly and fails
  *   on the next query.
  * - **Redis** sends `PING`. The throttler's storage is Redis (a dead one fails
- *   every request, not just a counter), and from build step 7 the publish queue
- *   lives there too.
+ *   every request, not just a counter).
  */
 import { Inject, Injectable } from '@nestjs/common';
 import type { Health, HealthCheck } from '@cms/shared';

@@ -8,6 +8,7 @@
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@cms/config": "workspace:*",
+    "@cms/db": "workspace:*",
     "@cms/shared": "workspace:*",
     "@playwright/test": "1.64.1",
     "@types/node": "^20.17.6",

@@ -26,6 +26,7 @@ No .env in the repo root.
 
   cp .env.example .env
   sed -i "s|^AUTH_SECRET=|AUTH_SECRET=$(openssl rand -base64 32)|" .env
+  sed -i "s|^REVALIDATE_SECRET=.*|REVALIDATE_SECRET=$(openssl rand -base64 32)|" .env
   sed -i "s|^CONTENT_API_KEY=.*|CONTENT_API_KEY=$(node scripts/new-api-key.mjs)|" .env
   pnpm db:seed   # registers the key
 
@@ -47,6 +48,16 @@ set +a
 if [[ ${#AUTH_SECRET} -lt 16 ]]; then
   echo "AUTH_SECRET must be at least 16 characters. Generate one:" >&2
   echo "  sed -i \"s|^AUTH_SECRET=.*|AUTH_SECRET=\$(openssl rand -base64 32)|\" .env" >&2
+  exit 1
+fi
+
+# The publisher signs revalidation webhooks with it and the site verifies them.
+# Without it the publisher refuses to start, and published posts would never
+# reach the cached pages: name it here, before three processes start.
+REVALIDATE_SECRET_CHECK="${REVALIDATE_SECRET:-}"
+if [[ ${#REVALIDATE_SECRET_CHECK} -lt 32 ]]; then
+  echo "REVALIDATE_SECRET must be at least 32 characters. Generate one:" >&2
+  echo "  sed -i \"s|^REVALIDATE_SECRET=.*|REVALIDATE_SECRET=\$(openssl rand -base64 32)|\" .env" >&2
   exit 1
 fi
 

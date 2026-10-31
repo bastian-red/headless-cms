@@ -1,9 +1,8 @@
 /**
  * The API's Redis connection.
  *
- * The throttler's storage today; from build step 7 the publisher's queue is
- * reached through BullMQ's own connections, not this one. Nothing here is a
- * source of truth. One connection is enough because this process never
+ * The throttler's storage, and nothing else: scheduling and webhook delivery
+ * live in Postgres (services/publisher). Nothing here is a source of truth. One connection is enough because this process never
  * subscribes to anything.
  *
  * The throttler's storage is Redis rather than the default in-memory one because

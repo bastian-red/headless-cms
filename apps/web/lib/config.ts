@@ -69,3 +69,19 @@ export function contentApiKey(): string {
  * is unreachable rather than shipping empty pages.
  */
 export const contentAtBuild = process.env.CONTENT_AT_BUILD === 'deferred' ? 'deferred' : 'required';
+
+/**
+ * The secret the publisher signs revalidation webhooks with (`POST
+ * /api/revalidate`). Read per request, so a site started without it still
+ * serves every page and refuses only the webhook, naming the variable.
+ */
+export function revalidateSecret(): string {
+  const secret = process.env.REVALIDATE_SECRET;
+  if (secret === undefined || secret.length < 32) {
+    throw new Error(
+      'REVALIDATE_SECRET must be set and at least 32 characters (openssl rand -base64 32), ' +
+        'the same value the publisher signs with.',
+    );
+  }
+  return secret;
+}

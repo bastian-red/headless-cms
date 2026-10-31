@@ -45,7 +45,7 @@ A separate process, the publisher, reads undelivered rows from the outbox and de
 
 That makes delivery at least once, not exactly once, and the web tier is built for it. Each announcement carries its event id, and invalidating a tag twice is harmless anyway: the second invalidation throws away a page that was just rebuilt, which costs one extra render and nothing else. We prefer that to the alternative, where a lost announcement leaves a stale page forever.
 
-Scheduled posts use the same path. An editor sets a time, the publisher holds a delayed job keyed by the revision, and at that time it performs the publish exactly as a person would, outbox row included. Two publisher processes running at once cannot publish twice, because the job id is the revision id and the queue refuses a second job with the same id. We explain that in [Scheduled means exactly once](/posts/scheduled-means-exactly-once).
+Scheduled posts use the same path. An editor sets a time, which is stored on the post itself, and once a second the publisher looks for posts whose time has come and publishes them exactly as a person would, outbox row included. Two publisher processes running at once cannot publish twice, because each one locks the posts it takes and skips the ones the other holds. We explain that in [Scheduled means exactly once](/posts/scheduled-means-exactly-once).
 
 ## The HTML is small because the text is the page
 

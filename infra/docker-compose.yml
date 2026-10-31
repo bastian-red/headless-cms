@@ -42,9 +42,9 @@ services:
     image: redis:7-alpine
     container_name: cms-redis
     restart: unless-stopped
-    # From build step 7 the publish queue lives here, and a lost scheduled
-    # publish is a post that silently never goes out, so append-only
-    # persistence is on.
+    # Rate-limit counters only (schedules and webhook delivery live in
+    # Postgres). Append-only persistence keeps a limit from resetting on a
+    # restart.
     command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
     ports:
       - '6390:6379'
@@ -92,6 +92,7 @@ services:
     environment:
       <<: *datastores
       PUBLISHER_HEALTH_PORT: '4400'
+      REVALIDATE_URL: http://web:3000/api/revalidate
     ports:
       - '4400:4400'
     depends_on:

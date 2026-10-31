@@ -5,12 +5,16 @@
  * see it (turbo strips undeclared names silently). A missing or malformed value
  * stops the process with one sentence naming every variable at fault.
  */
+import { REVALIDATE_SECRET_MIN_LENGTH } from '@cms/shared/server';
 import { z } from 'zod';
 
 export interface PublisherConfig {
   appVersion: string;
   databaseUrl: string;
-  redisUrl: string;
+  /** Where revalidation webhooks go: the site's `POST /api/revalidate`. */
+  revalidateUrl: string;
+  /** Shared with the site, which verifies the signature with it. */
+  revalidateSecret: string;
   healthPort: number;
 }
 
@@ -24,7 +28,8 @@ const port = z
 const ENV_NAMES: Record<keyof PublisherConfig, string> = {
   appVersion: 'APP_VERSION',
   databaseUrl: 'DATABASE_URL',
-  redisUrl: 'REDIS_URL',
+  revalidateUrl: 'REVALIDATE_URL',
+  revalidateSecret: 'REVALIDATE_SECRET',
   healthPort: 'PUBLISHER_HEALTH_PORT',
 };
 
@@ -33,13 +38,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): PublisherConfi
     .object({
       appVersion: z.string().default('0.0.0'),
       databaseUrl: z.string().url(),
-      redisUrl: z.string().url(),
+      revalidateUrl: z.string().url(),
+      revalidateSecret: z
+        .string()
+        .min(
+          REVALIDATE_SECRET_MIN_LENGTH,
+          `must be at least ${String(REVALIDATE_SECRET_MIN_LENGTH)} characters (openssl rand -base64 32)`,
+        ),
       healthPort: port,
     })
     .safeParse({
       appVersion: env.APP_VERSION,
       databaseUrl: env.DATABASE_URL,
-      redisUrl: env.REDIS_URL,
+      revalidateUrl: env.REVALIDATE_URL,
+      revalidateSecret: env.REVALIDATE_SECRET,
       healthPort: env.PUBLISHER_HEALTH_PORT,
     });
   if (!parsed.success) {

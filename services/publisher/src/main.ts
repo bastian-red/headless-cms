@@ -1,20 +1,28 @@
 /**
- * The publisher process.
+ * The publisher process: the clock and the courier.
  *
- * Build step 1 runs its health endpoint only: Postgres and Redis, checked for
- * real. Build step 7 adds the work it exists for -- draining the revalidation
- * outbox into HMAC-signed webhooks to the public site, with retries, and firing
- * scheduled publishes exactly once (a BullMQ delayed job per revision) -- and a
- * queue-depth check beside these two.
+ * Every second it publishes the scheduled posts that are due (`publishDue`)
+ * and delivers the revalidation outbox to the site (`drain`). Both read and
+ * write Postgres only, with row locks that make any number of replicas safe;
+ * the API and the publisher share no queue, and Redis is not involved.
+ *
+ * Every publish and every delivery is a JSON log line (the trace), and
+ * `/health` checks Postgres, the outbox backlog and the overdue schedules for
+ * real, so a site that has stopped accepting webhooks, or a publisher that
+ * has stopped keeping time, turns the check red rather than staying quiet.
  */
 import { createServer } from 'node:http';
 
 import { createPrismaClient } from '@cms/db';
 import { ConnectionLog, describeError } from '@cms/shared/server';
-import { Redis } from 'ioredis';
 
 import { loadConfig } from './config';
 import { httpStatusFor, report } from './health';
+import { BACKLOG_FAIL_SECONDS, backlog, drain } from './outbox';
+import { overdueSchedules, publishDue } from './schedule';
+
+/** How often it looks. Also the worst-case lateness of a scheduled publish. */
+const TICK_MS = 1000;
 
 const log = (event: string, data: Record<string, unknown> = {}) =>
   process.stdout.write(
@@ -25,27 +33,75 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const startedAt = Date.now();
   const prisma = createPrismaClient({ url: config.databaseUrl });
-  // Fail rather than queue: an offline queue would let /health pass against a
-  // Redis that is not there.
-  const redis = new Redis(config.redisUrl, { enableOfflineQueue: false, lazyConnect: true });
-  // An EventEmitter with no `error` listener throws, which would take the
-  // process down on a Redis blip instead of reporting it through /health.
-  // ioredis emits `error` on every retry (about every 2 s): log the transitions only.
-  const connection = new ConnectionLog({
-    write: ({ event, ...data }) => log(`redis_${event}`, data),
+  const target = { url: config.revalidateUrl, secret: config.revalidateSecret };
+
+  // A tick that fails because Postgres is down fails every second: log the
+  // transitions, not every attempt.
+  const database = new ConnectionLog({
+    write: ({ event, ...data }) => log(`database_${event}`, data),
   });
-  redis.on('error', (error) => connection.failed(error));
-  redis.on('ready', () => connection.recovered());
-  await redis
-    .connect()
-    .catch((error: unknown) => log('redis_unavailable', { error: describeError(error) }));
+
+  let stopping = false;
+  let timer: NodeJS.Timeout | undefined;
+  let running: Promise<void> = Promise.resolve();
+
+  const tick = async () => {
+    try {
+      for (const post of await publishDue(prisma)) {
+        log('published_scheduled', {
+          postId: post.postId,
+          slug: post.slug,
+          revisionId: post.revisionId,
+          scheduledFor: post.scheduledFor.toISOString(),
+          lateMs: Date.now() - post.scheduledFor.getTime(),
+        });
+      }
+      for (const { event, result } of await drain(prisma, target)) {
+        if (result.ok) {
+          log('delivered', { eventId: event.id, tags: event.tags, attempt: event.attempts });
+        } else {
+          log('delivery_failed', {
+            eventId: event.id,
+            attempt: event.attempts,
+            error: result.error,
+          });
+        }
+      }
+      database.recovered();
+    } catch (error) {
+      database.failed(error);
+    }
+  };
+
+  const loop = () => {
+    if (stopping) return;
+    running = tick().finally(() => {
+      if (!stopping) timer = setTimeout(loop, TICK_MS);
+    });
+  };
 
   const probes = {
     postgres: async () => {
       await prisma.$queryRaw`SELECT 1`;
     },
-    redis: async () => {
-      await redis.ping();
+    outbox: async () => {
+      const state = await backlog(prisma);
+      if (state.oldestSeconds !== null && state.oldestSeconds > BACKLOG_FAIL_SECONDS) {
+        throw new Error(
+          `${String(state.undelivered)} revalidation event(s) undelivered, the oldest for ` +
+            `${String(state.oldestSeconds)} s` +
+            (state.lastError === null ? '' : ` (last error: ${state.lastError})`),
+        );
+      }
+    },
+    schedule: async () => {
+      const overdue = await overdueSchedules(prisma);
+      if (overdue.count > 0) {
+        throw new Error(
+          `${String(overdue.count)} scheduled post(s) not published, the oldest ` +
+            `${String(overdue.oldestSeconds)} s past its time`,
+        );
+      }
     },
   };
 
@@ -63,13 +119,16 @@ async function main(): Promise<void> {
     });
   });
   server.listen(config.healthPort);
-  log('started', { port: config.healthPort });
+  log('started', { port: config.healthPort, revalidateUrl: config.revalidateUrl, tickMs: TICK_MS });
+  loop();
 
   const shutdown = async () => {
+    stopping = true;
+    clearTimeout(timer);
     server.close();
+    // Let a tick in flight finish settling what it delivered.
+    await running;
     await prisma.$disconnect();
-    // `quit`, not `disconnect`: it waits for in-flight replies.
-    await redis.quit().catch(() => undefined);
     process.exit(0);
   };
   process.once('SIGTERM', () => void shutdown());

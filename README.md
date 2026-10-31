@@ -8,14 +8,15 @@ revalidated by tag the moment a publish lands, with no rebuild. A versioned cont
 same published content to any other frontend, and the public site reads through it like any other
 client. Nothing unpublished may ever reach a page, a feed, a sitemap or a search result.
 
-> **Status: build step 6 of 11, the public site.** Sign-in, the three roles, the publisher process,
+> **Status: build step 7 of 11, publishing.** Sign-in, the three roles, the publisher process,
 > health and status, every test lane and CI are in place, and so are the content schema, a seeded
 > demo publication of forty posts, the one sanitizing markdown renderer, the API (posts and
 > revisions with stale-save conflicts, the editorial workflow, content API v1 and API keys),
 > full-text search, and the public site: every post, tag and author page prerendered from the
-> content API, the feed, the sitemap, JSON-LD and a social card per post. Publish-time
-> revalidation (the publisher's webhooks), comments, the studio editor and the visual identity
-> arrive in the following steps. This README is rewritten as each one lands (demo GIF included at the end);
+> content API, the feed, the sitemap, JSON-LD and a social card per post, and the publisher:
+> scheduled publishing and signed revalidation webhooks, so a publish reaches every cached page in
+> about a second and a half. Comments, the studio editor and the visual identity arrive in the
+> following steps. This README is rewritten as each one lands (demo GIF included at the end);
 > nothing below describes a feature that is not in the code.
 
 ```mermaid
@@ -27,13 +28,13 @@ flowchart LR
     web["apps/web<br/>Next.js 16<br/>public site + studio"] -->|"studio: service token<br/>(HS256, 120 s)"| api["apps/api<br/>NestJS<br/>+ services/search (library)"]
     web -->|"public site: content API v1<br/>(API key, cached by tag)"| api
   end
-  publisher["services/publisher<br/>Node"]
+  publisher["services/publisher<br/>Node: schedules + outbox"]
 
   api -->|"content, full-text search"| pg[(Postgres 16)]
   api -->|"throttler counters"| redis[(Redis 7)]
   api -->|"GET /health<br/>for /status"| publisher
-  publisher --> pg
-  publisher --> redis
+  publisher -->|"due schedules, outbox<br/>(SKIP LOCKED)"| pg
+  publisher -->|"POST /api/revalidate<br/>(HMAC-signed)"| web
 ```
 
 The browser only ever talks to `apps/web`. The web tier holds no database credentials (a lint rule
@@ -54,8 +55,10 @@ the same API an outside client would use.
 - **Rate limits scoped to what they protect.** Sign-in is capped at 5 a minute per address and
   comments (from step 8) at 10. The tests prove the sign-in budget limits sign-in and nothing else,
   because `@nestjs/throttler` v6 applies every named budget to every route unless it is skipped.
-- **Operability.** `GET /health` on the API and the publisher runs a real `SELECT 1` and `PING`, and
-  answers 503 naming the failing check. `/status` shows both, fed by the API.
+- **Operability.** `GET /health` on the API runs a real `SELECT 1` and `PING`; the publisher's
+  checks Postgres, the outbox backlog (red once an event is 5 minutes undelivered, with the last
+  error) and overdue schedules (red once a post is a minute late). Both answer 503 naming the
+  failing check, and `/status` shows both, fed by the API.
 - **Static pages that stay static.** `scripts/render-check.mjs` reads the build's prerender
   manifest and fails the E2E lane if any route leaves its planned row in the rendering matrix
   (below). That is the failure a single `cookies()` call in a shared layout causes: the build still
@@ -171,8 +174,8 @@ revision the client says it started from.
   takes effect on the next call rather than when the two-minute token expires.
 - **Every change readers can see writes its cache tags in the same transaction.** Publish,
   unpublish and renaming a live post insert a `revalidation_events` row (`posts`, `post:<slug>`,
-  `tag:<slug>`, `author:<id>`) that the publisher delivers from step 7. A save or a submit writes
-  none: nothing public changed.
+  `tag:<slug>`, `author:<id>`) that the publisher delivers. A save or a submit writes none: nothing
+  public changed.
 
 ### Content API v1 (`/v1`, API key)
 
@@ -294,6 +297,52 @@ while rendering, then replays the cache entry's headers onto the same response).
 `patches/next@16.4.1.patch` skips a replayed header the response already carries with the same
 value, and the E2E lane asserts exactly one `Location` on a fresh build.
 
+## Publishing: from a button to every cached page
+
+```mermaid
+sequenceDiagram
+  participant E as Editor
+  participant A as apps/api
+  participant P as Postgres
+  participant S as services/publisher
+  participant W as apps/web
+  E->>A: POST /studio/posts/:id/transitions (publish)
+  A->>P: one transaction: post live + revalidation_events row
+  loop every second
+    S->>P: claim due events (SKIP LOCKED, 30 s lease)
+    S->>W: POST /api/revalidate, x-quire-signature: t=..,v1=HMAC
+    W->>W: verify, then revalidateTag(tag, { expire: 0 })
+    S->>P: delivered, or retry after 1 s, 2 s, 4 s ... 5 min
+  end
+```
+
+- **The announcement cannot get lost.** The API writes the publish and its revalidation event in
+  one transaction (the outbox pattern), so a crash between "published" and "told the site" is not
+  a state the database can be in. The publisher delivers from that table.
+- **Scheduling is a column, not a job.** A scheduled post is `status = SCHEDULED` plus
+  `scheduled_for`. Once a second the publisher takes due posts `FOR UPDATE SKIP LOCKED` and
+  publishes them with their event in one transaction, so two publishers cannot publish a post
+  twice and a restart cannot lose one. `published_at` is the editor's time, not the tick's. Redis
+  was the other option (BullMQ delayed jobs); it would have meant a second system that has to
+  agree with Postgres about every schedule, cancel and edit, so Redis keeps only rate limits.
+- **At least once, safely.** A claimed event gets a 30 s lease; a publisher that dies mid-delivery
+  lets it lapse and the event goes again. Expiring a tag twice costs one extra render, so the
+  receiving end needs no deduplication. A failed delivery is retried with exponential backoff up to
+  5 minutes and is never dropped.
+- **Signed like a payment webhook.** The raw body and a timestamp are signed with HMAC-SHA256
+  (`REVALIDATE_SECRET`), checked within 300 s and in constant time, and verified before the body is
+  parsed. Without the secret, `POST /api/revalidate` is a 401 that touches nothing.
+- **Fresh on the very next request.** `revalidateTag(tag, { expire: 0 })` expires the tag at once
+  rather than serving the old page one more time while it refetches (`updateTag` would, but it
+  throws outside a server action).
+- **Measured.** `e2e/tests/publish.spec.ts` warms the archive, feed and sitemap, then publishes,
+  edits and unpublishes a post through the API against a production build; each change is visible
+  on the post page, the archive, the feed and the sitemap in 1.2-1.6 s (the test fails at 5 s). It
+  goes red if the site's route answers 200 without expiring the tags.
+
+[`services/publisher/README.md`](services/publisher/README.md) lists every guarantee with the test
+that holds it and how to read its health check.
+
 ## Running it
 
 Requires Node 20+, pnpm 9 and Docker.
@@ -302,6 +351,7 @@ Requires Node 20+, pnpm 9 and Docker.
 pnpm install
 cp .env.example .env
 sed -i "s|^AUTH_SECRET=|AUTH_SECRET=$(openssl rand -base64 32)|" .env
+sed -i "s|^REVALIDATE_SECRET=.*|REVALIDATE_SECRET=$(openssl rand -base64 32)|" .env
 sed -i "s|^CONTENT_API_KEY=.*|CONTENT_API_KEY=$(node scripts/new-api-key.mjs)|" .env
 docker compose -f infra/docker-compose.yml up -d     # Postgres :5444, Redis :6390
 pnpm db:deploy && pnpm db:seed                        # registers the site's key, writes search documents
@@ -328,7 +378,7 @@ The `migrate` service runs migrations and the seed from the api image (`pnpm db:
 `package-import-method=copy`, which keeps a cold build of all three inside about 2 GB of Docker
 disk.
 
-`pnpm dev` runs `scripts/dev.sh`, which loads `.env`, checks `AUTH_SECRET` and `CONTENT_API_KEY`
+`pnpm dev` runs `scripts/dev.sh`, which loads `.env`, checks `AUTH_SECRET`, `REVALIDATE_SECRET` and `CONTENT_API_KEY`
 and that Postgres and Redis answer, then starts turbo. Turbo reads no `.env` itself and runs in strict environment mode,
 so without the wrapper the API would boot with no secret. The web task then runs
 `scripts/wait-for-api.mjs`, which holds `next dev` until the API answers: Next is ready in 2 s and
@@ -338,13 +388,13 @@ the API listens after about 12 s, and a page opened in between was a 500.
 
 | Lane                 | Command                       | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | -------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate (every commit)  | `pnpm test`                   | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML`; the SEO builders (descriptions, JSON-LD escaping, RSS well-formed whatever a post says, RFC 822 dates, `dateModified` never before `datePublished`); every public route on one revalidate window, none reading the request, none dropping the feed link                                                                                                                                             |
+| Gate (every commit)  | `pnpm test`                   | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML`; the SEO builders (descriptions, JSON-LD escaping, RSS well-formed whatever a post says, RFC 822 dates, `dateModified` never before `datePublished`); every public route on one revalidate window, none reading the request, none dropping the feed link; webhook signatures (replay window, forged body, other secret) and the revalidate route touching nothing it did not verify; the publisher's backoff and signed delivery                                                                                                                                            |
 | Environment contract | `pnpm env:contract`           | Source, `.env.example` and `turbo.json` agree in all four directions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Seed check           | `./scripts/seed-check.sh`     | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row or a live search document, one live search document per live post, every internal link in a live post resolves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Integration          | `./scripts/integration.sh`    | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race) and the search documents' `live` flag following every publish, then the search query on the seeded corpus (title tier, no draft or canary findable, query syntax, every snippet path, cursor crawl), then the seeded newsroom behind the real Nest graph on Postgres and Redis at the documented budgets: sign-in and the default-closed guard; every studio route against every role (403 exactly where the role table says no, before the body is read); the five-way stale-save race; the render deadline; every workflow transition and its outbox row; the content API's pagination, filters, ETags, 308/410/404 and a canary crawl of every response; the OpenAPI document matching the router; the last-admin race; API key revocation |
+| Integration          | `./scripts/integration.sh`    | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race) and the search documents' `live` flag following every publish, then the search query on the seeded corpus (title tier, no draft or canary findable, query syntax, every snippet path, cursor crawl), then the seeded newsroom behind the real Nest graph on Postgres and Redis at the documented budgets: sign-in and the default-closed guard; every studio route against every role (403 exactly where the role table says no, before the body is read); the five-way stale-save race; the render deadline; every workflow transition and its outbox row; the content API's pagination, filters, ETags, 308/410/404 and a canary crawl of every response; the OpenAPI document matching the router; the last-admin race; API key revocation; then the publisher: due vs future schedules, two publishers racing for twelve due posts (each published once, one event each), signed delivery to a real HTTP server, backoff and the 5 min cap, the lease, three publishers draining 45 events (each delivered once) |
 | Search bench         | `pnpm search:bench`           | p95 < 50 ms over 2,000 published posts and 4,500 documents, 25 query shapes, through the exact function `/v1/search` calls; the GIN index used by a selective query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Red proofs           | `node scripts/red-proofs.mjs` | Breaks each guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags; for search the title tier, both draft defenses, the exclusion rule, the snippet window's check, the cursor binding, control-character stripping, and the first design's ranking against the bench), runs the suite that claims it, and fails unless that suite goes red                                                                                                                                                                                                                                                                                                                                                                               |
-| E2E                  | `./scripts/e2e.sh`            | Production build against the seeded API, the rendering matrix and its content (36 posts prerendered, no canary anywhere in `.next/`), Chromium and Firefox: every sitemap page (200, unique title and description, self canonical, feed link, JSON-LD), the post's JSON-LD and 1200×630 card, 308 with one `Location` and 404s, the feed against the API, robots, search (noindex, marks, paging), sign-in per role, deep links, open-redirect refusal, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px                                                                                                                                                                                                                                                                                                                     |
+| Red proofs           | `node scripts/red-proofs.mjs` | Breaks each guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags; for the publisher the scheduled-publish lock, the outbox lock and lease, the backoff cap, a redirect as delivery, the replay window and the route's signature check; for search the title tier, both draft defenses, the exclusion rule, the snippet window's check, the cursor binding, control-character stripping, and the first design's ranking against the bench), runs the suite that claims it, and fails unless that suite goes red                                                                                                                                                                                                                                                                                                                                                                               |
+| E2E                  | `./scripts/e2e.sh`            | Production build against the seeded API, the rendering matrix and its content (36 posts prerendered, no canary anywhere in `.next/`), Chromium and Firefox: every sitemap page (200, unique title and description, self canonical, feed link, JSON-LD), the post's JSON-LD and 1200×630 card, 308 with one `Location` and 404s, the feed against the API, robots, search (noindex, marks, paging), sign-in per role, deep links, open-redirect refusal, publish, edit and unpublish reaching the cached page, archive, feed and sitemap within 5 s, the unsigned webhook refused, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px                                                                                                                                                                                                                                                                                                                     |
 | Dev smoke            | `./scripts/dev-smoke.sh`      | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves the archive on the very first request once the web port opens (no 500 while the API compiles), a studio that read the editor from Postgres and a public archive read through the content API with the site's key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 The pre-commit hook runs gitleaks, the environment contract, the invisible-character scan, the
@@ -363,7 +413,7 @@ document.
 apps/web            Next.js 16: the public site and the studio
 apps/api            NestJS: auth, studio API (posts, revisions, workflow, tags, users, keys), content API v1 and search, health, status
 services/search     Postgres full-text search: the query, ranking, snippets, cursors, reindex
-services/publisher  publish delivery and scheduling (health only until step 7)
+services/publisher  scheduled publishing and signed revalidation webhooks, from Postgres
 packages/markdown   the one renderer: parse, sanitize, audit; React, HTML and text out
 packages/db         Prisma schema, migrations, the seeded publication, schema tests
 packages/shared     zod contracts, roles, error vocabulary, service tokens

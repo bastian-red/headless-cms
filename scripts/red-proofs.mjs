@@ -6,11 +6,14 @@
  *
  *   node scripts/red-proofs.mjs            # every proof
  *   node scripts/red-proofs.mjs revoked    # proofs whose name matches
+ *   node scripts/red-proofs.mjs outbox webhook   # proofs matching any of them
  *
  * Each mutation must match its file exactly once (so a refactor that moves
  * the line fails here loudly instead of "proving" nothing), and the original
  * file is restored afterwards, also on Ctrl-C. Needs the datastores up, like
- * `./scripts/integration.sh`, which it calls.
+ * `./scripts/integration.sh`, which it calls. The publisher lane runs its
+ * suite directly against cms_it, so `./scripts/integration.sh` must have run
+ * once (it creates and migrates that database).
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -91,6 +94,61 @@ const PROOFS = [
     to: 'const bare = (tag: string) => tag.trim();',
     suite: ['unit'],
   },
+  // --- publisher and revalidation (step 7) -------------------------------
+  {
+    name: 'scheduled publish without the row lock or the status re-check',
+    file: 'services/publisher/src/schedule.ts',
+    from: `        LIMIT \${limit}
+        FOR UPDATE SKIP LOCKED
+      )`,
+    to: `        LIMIT \${limit}
+      )`,
+    also: { from: "WHERE p.id = due.id AND p.status = 'SCHEDULED'", to: 'WHERE p.id = due.id' },
+    suite: ['publisher'],
+  },
+  {
+    name: 'outbox claim without SKIP LOCKED',
+    file: 'services/publisher/src/outbox.ts',
+    from: `      LIMIT \${limit}
+      FOR UPDATE SKIP LOCKED`,
+    to: `      LIMIT \${limit}`,
+    suite: ['publisher'],
+  },
+  {
+    name: 'outbox claim without the lease',
+    file: 'services/publisher/src/outbox.ts',
+    from: 'next_attempt_at = now() + make_interval(secs => ${leaseMs / 1000})',
+    to: 'next_attempt_at = now()',
+    suite: ['publisher'],
+  },
+  {
+    name: 'outbox backoff without the cap',
+    file: 'services/publisher/src/outbox.ts',
+    from: 'return Math.min(1000 * 2 ** Math.max(0, attempts - 1), MAX_BACKOFF_MS);',
+    to: 'return 1000 * 2 ** Math.max(0, attempts - 1);',
+    suite: ['unit', '@cms/publisher'],
+  },
+  {
+    name: 'outbox counts a redirect as a delivery',
+    file: 'services/publisher/src/outbox.ts',
+    from: 'if (response.ok) {',
+    to: 'if (response.status < 400) {',
+    suite: ['unit', '@cms/publisher'],
+  },
+  {
+    name: 'webhook signature without the replay window',
+    file: 'packages/shared/src/server/webhook.ts',
+    from: "if (Math.abs(nowSeconds - timestamp) > toleranceSeconds) return { ok: false, reason: 'stale' };",
+    to: '',
+    suite: ['unit', '@cms/shared'],
+  },
+  {
+    name: 'revalidate route acts on a body with a bad signature',
+    file: 'apps/web/lib/revalidate.ts',
+    from: 'if (!verdict.ok) return { status: 401, reason: verdict.reason };',
+    to: 'if (!verdict.ok && request.signature === null) return { status: 401, reason: verdict.reason };',
+    suite: ['unit', '@cms/web'],
+  },
   // --- search (step 5) ---------------------------------------------------
   {
     name: 'search without the title tier',
@@ -148,22 +206,44 @@ const PROOFS = [
   },
 ];
 
-const filter = process.argv[2];
-const chosen = PROOFS.filter((p) => filter === undefined || p.name.includes(filter));
+const filters = process.argv.slice(2);
+const chosen = PROOFS.filter(
+  (p) => filters.length === 0 || filters.some((filter) => p.name.includes(filter)),
+);
 if (chosen.length === 0) {
-  console.error(`red-proofs: no proof matches "${filter}"`);
+  console.error(`red-proofs: no proof matches ${filters.map((f) => `"${f}"`).join(' or ')}`);
   process.exit(2);
+}
+
+/** cms_it, derived the way scripts/integration.sh derives it. */
+function integrationDatabase() {
+  const base = process.env.DATABASE_URL ?? 'postgresql://cms:cms@localhost:5444/cms?schema=public';
+  return process.env.INTEGRATION_DATABASE_URL ?? base.replace('/cms?', '/cms_it?');
 }
 
 function run(suite) {
   const [lane, arg] = suite;
   const options = { cwd: ROOT, encoding: 'utf8' };
   const result =
-    lane === 'unit'
-      ? spawnSync('pnpm', ['--filter', arg ?? '@cms/api', 'exec', 'vitest', 'run'], options)
-      : lane === 'bench'
-        ? spawnSync('pnpm', ['search:bench'], options)
-        : spawnSync('./scripts/integration.sh', [arg], options);
+    lane === 'publisher'
+      ? spawnSync(
+          'pnpm',
+          [
+            '--filter',
+            '@cms/publisher',
+            'exec',
+            'vitest',
+            'run',
+            '--config',
+            'vitest.integration.config.ts',
+          ],
+          { ...options, env: { ...process.env, DATABASE_URL: integrationDatabase() } },
+        )
+      : lane === 'unit'
+        ? spawnSync('pnpm', ['--filter', arg ?? '@cms/api', 'exec', 'vitest', 'run'], options)
+        : lane === 'bench'
+          ? spawnSync('pnpm', ['search:bench'], options)
+          : spawnSync('./scripts/integration.sh', [arg], options);
   return {
     status: result.status,
     tail: `${result.stdout}${result.stderr}`
@@ -185,14 +265,18 @@ const results = [];
 for (const proof of chosen) {
   const path = join(ROOT, proof.file);
   const original = readFileSync(path, 'utf8');
-  const count = original.split(proof.from).length - 1;
-  if (count !== 1) {
-    results.push({ name: proof.name, verdict: `MOVED (matches ${String(count)} times)` });
+  const edits = [proof, ...(proof.also === undefined ? [] : [proof.also])];
+  const counts = edits.map((edit) => original.split(edit.from).length - 1);
+  if (counts.some((count) => count !== 1)) {
+    results.push({ name: proof.name, verdict: `MOVED (matches ${counts.join('/')} times)` });
     continue;
   }
   restore = () => writeFileSync(path, original);
   try {
-    writeFileSync(path, original.replace(proof.from, proof.to));
+    writeFileSync(
+      path,
+      edits.reduce((text, edit) => text.replace(edit.from, edit.to), original),
+    );
     process.stdout.write(`red-proofs: ${proof.name} ... `);
     const { status, tail } = run(proof.suite);
     const verdict = status === 0 ? 'STAYED GREEN' : 'red';

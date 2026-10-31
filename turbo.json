@@ -32,6 +32,8 @@
     "RATE_LIMIT_COMMENT",
     "RATE_LIMIT_GLOBAL",
     "REDIS_URL",
+    "REVALIDATE_SECRET",
+    "REVALIDATE_URL",
     "WEB_PORT"
   ],
 

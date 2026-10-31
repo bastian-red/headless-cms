@@ -41,7 +41,8 @@ describe('report', () => {
 describe('loadConfig', () => {
   const env = {
     DATABASE_URL: 'postgresql://cms:cms@localhost:5444/cms',
-    REDIS_URL: 'redis://localhost:6390',
+    REVALIDATE_URL: 'http://localhost:3000/api/revalidate',
+    REVALIDATE_SECRET: 'x'.repeat(32),
     PUBLISHER_HEALTH_PORT: '4400',
   };
 
@@ -50,8 +51,14 @@ describe('loadConfig', () => {
   });
 
   it('names every bad variable in one message', () => {
-    expect(() => loadConfig({ ...env, REDIS_URL: undefined, PUBLISHER_HEALTH_PORT: 'x' })).toThrow(
-      /REDIS_URL[\s\S]*PUBLISHER_HEALTH_PORT/u,
+    expect(() =>
+      loadConfig({ ...env, REVALIDATE_URL: undefined, PUBLISHER_HEALTH_PORT: 'x' }),
+    ).toThrow(/REVALIDATE_URL[\s\S]*PUBLISHER_HEALTH_PORT/u);
+  });
+
+  it('refuses a guessable webhook secret, naming the variable and how to make one', () => {
+    expect(() => loadConfig({ ...env, REVALIDATE_SECRET: 'short' })).toThrow(
+      /REVALIDATE_SECRET: must be at least 32 characters \(openssl rand -base64 32\)/u,
     );
   });
 });

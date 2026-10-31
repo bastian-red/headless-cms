@@ -49,6 +49,10 @@ trap cleanup EXIT
 . scripts/load-env.sh
 
 [[ -n "${AUTH_SECRET:-}" ]] || export AUTH_SECRET=ci-secret-at-least-32-characters-long
+REVALIDATE_SECRET_CHECK="${REVALIDATE_SECRET:-}"
+[[ ${#REVALIDATE_SECRET_CHECK} -ge 32 ]] || export REVALIDATE_SECRET=e2e-revalidate-secret-0123456789abcdef
+# The publisher delivers to the site this lane starts, wherever that is.
+export REVALIDATE_URL="${APP_BASE_URL%/}/api/revalidate"
 # The site's content API key: the seed registers whatever this is.
 [[ -n "${CONTENT_API_KEY:-}" ]] || CONTENT_API_KEY="$(node scripts/new-api-key.mjs)"
 export CONTENT_API_KEY
