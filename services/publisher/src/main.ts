@@ -10,6 +10,7 @@
 import { createServer } from 'node:http';
 
 import { createPrismaClient } from '@cms/db';
+import { ConnectionLog, describeError } from '@cms/shared/server';
 import { Redis } from 'ioredis';
 
 import { loadConfig } from './config';
@@ -29,10 +30,15 @@ async function main(): Promise<void> {
   const redis = new Redis(config.redisUrl, { enableOfflineQueue: false, lazyConnect: true });
   // An EventEmitter with no `error` listener throws, which would take the
   // process down on a Redis blip instead of reporting it through /health.
-  redis.on('error', (error) => log('redis_error', { error: error.message }));
+  // ioredis emits `error` on every retry (about every 2 s): log the transitions only.
+  const connection = new ConnectionLog({
+    write: ({ event, ...data }) => log(`redis_${event}`, data),
+  });
+  redis.on('error', (error) => connection.failed(error));
+  redis.on('ready', () => connection.recovered());
   await redis
     .connect()
-    .catch((error: unknown) => log('redis_unavailable', { error: String(error) }));
+    .catch((error: unknown) => log('redis_unavailable', { error: describeError(error) }));
 
   const probes = {
     postgres: async () => {
@@ -72,6 +78,6 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   // The message alone: config errors are written to be read by whoever starts it.
-  log('fatal', { error: error instanceof Error ? error.message : String(error) });
+  log('fatal', { error: describeError(error) });
   process.exit(1);
 });

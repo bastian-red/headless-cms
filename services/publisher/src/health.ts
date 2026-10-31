@@ -7,6 +7,7 @@
  * cannot read JSON still sees the outage.
  */
 import type { Health, HealthCheck } from '@cms/shared';
+import { describeError } from '@cms/shared/server';
 
 export type Probe = () => Promise<void>;
 
@@ -21,7 +22,7 @@ export async function timed(name: string, probe: Probe): Promise<HealthCheck> {
       status: 'fail',
       latencyMs: Date.now() - started,
       // The message, never a stack: this body is public through /status.
-      detail: error instanceof Error ? error.message : String(error),
+      detail: describeError(error),
     };
   }
 }

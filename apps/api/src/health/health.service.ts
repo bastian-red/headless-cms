@@ -12,6 +12,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import type { Health, HealthCheck } from '@cms/shared';
+import { describeError } from '@cms/shared/server';
 
 import { API_CONFIG, type ApiConfig } from '../config/config';
 import { PrismaService } from '../infra/prisma.service';
@@ -58,7 +59,7 @@ async function timed(name: string, run: () => Promise<void>): Promise<HealthChec
       latencyMs: Date.now() - started,
       // The message, not the stack. This body is read by whoever is running
       // dev-smoke and by the /status page, and a stack is neither.
-      detail: error instanceof Error ? error.message : String(error),
+      detail: describeError(error),
     };
   }
 }

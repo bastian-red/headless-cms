@@ -318,6 +318,8 @@ database, published on purpose):
 | Author | `mara@quire.test`  | `author-password-2026` |
 
 The whole stack in containers: `docker compose -f infra/docker-compose.yml --profile app up -d --build`.
+It takes the same ports as `pnpm dev`, so run one or the other; `pnpm dev` refuses to start while
+the containers hold them and prints the command that stops them.
 An image build has no API to prerender from, so `infra/Dockerfile.web` sets
 `CONTENT_AT_BUILD=deferred`: the public pages render on their first request instead, and their
 content reads are still cached by tag. Any other build needs the API running, and says so.

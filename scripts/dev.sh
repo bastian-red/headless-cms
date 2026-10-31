@@ -84,6 +84,27 @@ check_reachable "${DATABASE_URL:-}" Postgres || failed=1
 check_reachable "${REDIS_URL:-}" Redis || failed=1
 [[ $failed -eq 0 ]] || exit 1
 
+# The three ports this starts on must be free. The usual holder is the same
+# stack in containers (`--profile app`), and compose then cannot bind them
+# either; say which one, and how to stop it, instead of a Next or Nest
+# EADDRINUSE trace halfway through the start.
+port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+busy=()
+for pair in "web:${WEB_PORT:-3000}" "api:${API_PORT:-4000}" "publisher:${PUBLISHER_HEALTH_PORT:-4400}"; do
+  port_in_use "${pair#*:}" && busy+=("${pair%%:*} (port ${pair#*:})")
+done
+if [[ ${#busy[@]} -gt 0 ]]; then
+  echo "Already in use: ${busy[*]}." >&2
+  holders="$(docker ps --filter 'name=^cms-(api|web|publisher)$' --format '{{.Names}}' 2>/dev/null || true)"
+  if [[ -n "$holders" ]]; then
+    echo "The containerised stack is running ($(echo "$holders" | tr '\n' ' ')). Stop it first:" >&2
+    echo "  docker compose -f infra/docker-compose.yml --profile app stop api web publisher" >&2
+  else
+    echo "Another pnpm dev, or another process, holds them. Find it with: ss -ltnp | grep -E ':(3000|4000|4400)'" >&2
+  fi
+  exit 1
+fi
+
 # `exec` so Ctrl-C reaches turbo directly and the persistent tasks shut down
 # cleanly instead of being orphaned behind a wrapper shell.
 # --log-order=stream: under GITHUB_ACTIONS turbo otherwise groups each task's

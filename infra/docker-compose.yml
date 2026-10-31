@@ -14,6 +14,9 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: cms-postgres
+    # Back after a Docker daemon restart or a reboot. Without it a restart left
+    # pnpm dev retrying a stopped Redis every 2 s until someone noticed.
+    restart: unless-stopped
     # A smaller WAL ceiling than the 1 GB default: the search bench (build step
     # 5) writes thousands of revisions, and a full Docker disk crashes the server
     # mid-run (a sibling project learned this). 128 MB only means more frequent
@@ -38,6 +41,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: cms-redis
+    restart: unless-stopped
     # From build step 7 the publish queue lives here, and a lost scheduled
     # publish is a post that silently never goes out, so append-only
     # persistence is on.

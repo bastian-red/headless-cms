@@ -11,6 +11,7 @@
  * replica, is not a limit.
  */
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { ConnectionLog } from '@cms/shared/server';
 import { Redis } from 'ioredis';
 
 import { API_CONFIG, type ApiConfig } from '../config/config';
@@ -32,9 +33,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     // `error` on a blip, and an EventEmitter with no `error` listener throws --
     // in Node an uncaught exception that takes the whole API down because Redis
     // hiccuped for 200ms.
-    this.client.on('error', (error) => {
-      console.error('[api] redis error', error);
+    // ioredis retries about every 2 s and emits `error` on each attempt; the
+    // log says when it went down, reminds once a minute, and says when it is back.
+    const connection = new ConnectionLog({
+      write: (line) => {
+        if (line.event === 'up')
+          console.log(`[api] redis is back after ${String(Math.round(line.downForMs / 1000))} s`);
+        else
+          console.error(
+            line.event === 'down'
+              ? `[api] redis unreachable (${line.reason}); retrying, /health reports it`
+              : `[api] redis still unreachable after ${String(Math.round(line.downForMs / 1000))} s, ${String(line.attempts)} attempts (${line.reason})`,
+          );
+      },
     });
+    this.client.on('error', (error) => connection.failed(error));
+    this.client.on('ready', () => connection.recovered());
   }
 
   async onModuleInit(): Promise<void> {
