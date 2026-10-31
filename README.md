@@ -8,12 +8,13 @@ revalidated by tag the moment a publish lands, with no rebuild. A versioned cont
 same published content to any other frontend, and the public site reads through it like any other
 client. Nothing unpublished may ever reach a page, a feed, a sitemap or a search result.
 
-> **Status: build step 3 of 11, the markdown renderer.** Sign-in, the three roles, the API, the
-> publisher process, health and status, every test lane and CI are in place, and so are the content
-> schema, a seeded demo publication of forty posts and the one sanitizing markdown renderer. The
-> content API, search, the rendering matrix, SEO, comments, the studio editor and the visual
-> identity arrive in the following steps. This README is rewritten as each one lands (demo GIF included at
-> the end); nothing below describes a feature that is not in the code.
+> **Status: build step 4 of 11, the API.** Sign-in, the three roles, the publisher process, health
+> and status, every test lane and CI are in place, and so are the content schema, a seeded demo
+> publication of forty posts, the one sanitizing markdown renderer, and the API: posts and
+> revisions with stale-save conflicts, the editorial workflow, content API v1 and API keys. Search,
+> the rendering matrix, SEO, comments, the studio editor and the visual identity arrive in the
+> following steps. This README is rewritten as each one lands (demo GIF included at the end);
+> nothing below describes a feature that is not in the code.
 
 ```mermaid
 flowchart LR
@@ -131,6 +132,66 @@ source ─ remark-parse + GFM ─ headings shifted below the page's h1 ─ remar
   deadline and terminates it on overrun. From step 4 the API refuses to save a body that fails,
   so pages only ever render bodies that finished in time.
 
+## The API
+
+Two audiences, two front doors, one rule underneath: every write locks the post row and checks the
+revision the client says it started from.
+
+### Studio API (`/studio`, signed in)
+
+| Route | Needs | What it does |
+|---|---|---|
+| `GET/POST /studio/posts` | `post.read` / `post.write` | List (an author sees only their own), create with revision 1 |
+| `GET /studio/posts/:id`, `.../revisions`, `.../revisions/:rid` | `post.read` | The post with its head, the history, one revision |
+| `POST /studio/posts/:id/revisions` | `post.write` | Save: `baseRevisionId` + fields. 201 new head, 200 nothing changed, 409 stale, 422 does not render |
+| `POST /studio/posts/:id/revisions/:rid/restore` | `post.restore` | Restore = a new revision with the old content; history is never rewritten |
+| `PUT /studio/posts/:id/slug` | `post.write` | Rename; renaming a post that was ever public is an editor's call and leaves a 308 behind |
+| `POST /studio/posts/:id/transitions` | per action | `submit`, `withdraw`, `publish`, `schedule`, `unschedule`, `unpublish`, pinned to the head the caller saw |
+| `GET/POST /studio/tags` | `post.read` / `tag.manage` | |
+| `GET/POST /studio/users`, `PATCH .../:id/role` | `user.manage` | The last admin cannot be demoted |
+| `GET/POST/DELETE /studio/api-keys` | `apikey.manage` | A key is shown once and stored as a SHA-256 |
+
+- **A stale save is a 409 that says what happened.** Five editors saving from the same base:
+  one wins and four get `409` with the winning revision, the fields that differ and a unified diff
+  of the body (`details.bodyPatch`). The row lock (`SELECT ... FOR UPDATE`) is what makes that
+  answer possible: without it the losers hit the unique revision number instead and learn nothing.
+- **A body that does not render in time is a 422, before anything is written.** Every save and
+  restore runs the body through `@cms/markdown/server`'s `RenderChecker` (one worker, 2 s
+  deadline). A pathological body is refused with `details.render: "timeout"` and the next save
+  works, so a post can never hold a body the page cannot render.
+- **An editor publishes exactly what they reviewed.** A transition names `revisionId`; if the head
+  moved since, it is a 409 and nothing changes. Publishing needs an excerpt (it is the feed
+  summary and the meta description), a schedule must be at least a minute ahead, an author's save
+  cannot touch a scheduled post, and an editor's save cancels the schedule.
+- **Somebody else's post is 404, not 403**, for an author, on every route.
+- **The role is read from the database on every request**, never from the token, so a demotion
+  takes effect on the next call rather than when the two-minute token expires.
+- **Every change readers can see writes its cache tags in the same transaction.** Publish,
+  unpublish and renaming a live post insert a `revalidation_events` row (`posts`, `post:<slug>`,
+  `tag:<slug>`, `author:<id>`) that the publisher delivers from step 7. A save or a submit writes
+  none: nothing public changed.
+
+### Content API v1 (`/v1`, API key)
+
+`Authorization: Bearer hcms_...`, issued by an admin in the studio. Missing, malformed, unknown,
+revoked and studio-token credentials all get the same 401.
+
+| Route | Answer |
+|---|---|
+| `GET /v1/posts?tag=&author=&limit=&cursor=` | Live posts, newest first, keyset-paginated (`nextCursor`) |
+| `GET /v1/posts/:slug` | The published revision as markdown and as sanitized HTML, with outline, words and reading time; `308` + `Location` from an old slug; `410` if taken down; `404` if it never went out |
+| `GET /v1/tags` | Tags on at least one live post, with counts |
+| `GET /v1/openapi.json` | The OpenAPI 3 document, public, generated from the same zod schemas the tests parse responses with |
+
+- **Drafts have no road out.** Every query reads `published_revision_id`; nothing in the content
+  service selects the head. The integration suite crawls every page, post and tag for the seed's
+  canary words and fails on one, including on the post whose pending draft holds them.
+- **`ETag` on every 200**, `304` on a matching `If-None-Match`, `Cache-Control: no-cache`.
+- **Per-key rate limits.** A key is its own budget, so the public site and a second frontend
+  never share one.
+- **A draft and nothing at all answer byte for byte the same 404**, so the API does not disclose
+  what is being written.
+
 ## Running it
 
 Requires Node 20+, pnpm 9 and Docker.
@@ -163,10 +224,11 @@ so without the wrapper the API would boot with no secret.
 
 | Lane | Command | What it proves |
 |---|---|---|
-| Gate (every commit) | `pnpm test` | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML` |
+| Gate (every commit) | `pnpm test` | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML` |
 | Environment contract | `pnpm env:contract` | Source, `.env.example` and `turbo.json` agree in all four directions |
 | Seed check | `./scripts/seed-check.sh` | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row, every internal link in a live post resolves |
-| Integration | `./scripts/integration.sh` | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race), then the real Nest graph on Postgres and Redis at the documented budgets: sign-in, default-closed guard, role read from the database, the sign-in budget limiting sign-in only |
+| Integration | `./scripts/integration.sh` | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race), then the seeded newsroom behind the real Nest graph on Postgres and Redis at the documented budgets: sign-in and the default-closed guard; every studio route against every role (403 exactly where the role table says no, before the body is read); the five-way stale-save race; the render deadline; every workflow transition and its outbox row; the content API's pagination, filters, ETags, 308/410/404 and a canary crawl of every response; the OpenAPI document matching the router; the last-admin race; API key revocation |
+| Red proofs | `node scripts/red-proofs.mjs` | Breaks each API guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags), runs the suite that claims it, and fails unless that suite goes red |
 | E2E | `./scripts/e2e.sh` | Production build, the rendering matrix, Chromium and Firefox: sign-in per role, deep links, open-redirect refusal, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px |
 | Dev smoke | `./scripts/dev-smoke.sh` | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves a studio that read the editor from Postgres |
 
@@ -184,7 +246,7 @@ document.
 
 ```
 apps/web            Next.js 16: the public site and the studio
-apps/api            NestJS: auth, health, status (content API from step 4)
+apps/api            NestJS: auth, studio API (posts, revisions, workflow, tags, users, keys), content API v1, health, status
 services/publisher  publish delivery and scheduling (health only until step 7)
 packages/markdown   the one renderer: parse, sanitize, audit; React, HTML and text out
 packages/db         Prisma schema, migrations, the seeded publication, schema tests

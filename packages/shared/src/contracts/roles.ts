@@ -15,7 +15,7 @@ import { z } from 'zod';
  *   edits only posts they wrote; that ownership rule is data-dependent and lives
  *   in the posts service, not in this table.
  * - `EDITOR` decides what readers see: publish, schedule, unpublish, restore a
- *   revision, edit anybody's post, moderate comments.
+ *   revision, edit anybody's post, create tags, moderate comments.
  * - `ADMIN` runs the newsroom: people, their roles, content API keys.
  *
  * The spelling matches the Postgres enum (`packages/db`), so a role read from a
@@ -32,6 +32,8 @@ export const ACTIONS = [
   'post.submit',
   'post.write.any',
   'post.publish',
+  'post.restore',
+  'tag.manage',
   'comment.moderate',
   'user.manage',
   'apikey.manage',
@@ -44,6 +46,8 @@ const EDITOR_ACTIONS: readonly Action[] = [
   ...AUTHOR_ACTIONS,
   'post.write.any',
   'post.publish',
+  'post.restore',
+  'tag.manage',
   'comment.moderate',
 ];
 

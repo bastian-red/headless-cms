@@ -15,6 +15,7 @@
  * **What a counter is keyed by.** Signed-in calls all arrive from the web
  * server, so the address is the same for every author; keying them by address
  * would make one busy author throttle everybody. They are keyed by the user id
+ * (and content API calls by their key)
  * in the verified token instead, which is why `SessionGuard` runs BEFORE the
  * throttler (`app.module.ts`). Anonymous calls (sign-in, a reader's comment) are keyed
  * by address: the web app forwards the browser's address in
@@ -47,8 +48,13 @@ export function budgetOf(context: ExecutionContext): BudgetName | undefined {
   ]);
 }
 
-export function trackerFor(request: Pick<RequestWithUser, 'user' | 'ip'>): string {
+export function trackerFor(
+  request: Pick<RequestWithUser, 'user' | 'ip'> & { apiKey?: { readonly id: string } },
+): string {
   if (request.user !== undefined) return `user:${request.user.id}`;
+  // A content API client is keyed by its key: the public site makes every
+  // request from one address, and a second frontend must not share its budget.
+  if (request.apiKey !== undefined) return `key:${request.apiKey.id}`;
   return `ip:${request.ip ?? 'unknown'}`;
 }
 

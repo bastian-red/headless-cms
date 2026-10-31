@@ -14,7 +14,13 @@ describe('the role matrix', () => {
   });
 
   it('never lets an author decide what readers see', () => {
-    for (const action of ['post.publish', 'post.write.any', 'comment.moderate'] as const)
+    for (const action of [
+      'post.publish',
+      'post.restore',
+      'post.write.any',
+      'tag.manage',
+      'comment.moderate',
+    ] as const)
       expect(can('AUTHOR', action), action).toBe(false);
   });
 

@@ -14,7 +14,9 @@ import { describe, expect, it } from 'vitest';
 import type * as Server from './server.js';
 
 const built = new URL('../dist/server.js', import.meta.url);
-const { checkRenderable, RENDER_BUDGET_MS } = (await import(built.href)) as typeof Server;
+const { checkRenderable, RenderChecker, RENDER_BUDGET_MS } = (await import(
+  built.href
+)) as typeof Server;
 
 const longRead = readFileSync(
   new URL('../../db/prisma/content/posts/the-long-way-to-a-fast-page.md', import.meta.url),
@@ -69,5 +71,57 @@ describe('checkRenderable', () => {
     ]);
     expect(slow).toMatchObject({ ok: false, reason: 'timeout' });
     expect(fast).toMatchObject({ ok: true, words: 4 });
+  });
+});
+
+describe('RenderChecker, the long-lived one a server keeps', () => {
+  const slow = `${'*_'.repeat(4000)}a${'_*'.repeat(4000)}`;
+
+  it('pays thread start-up once, not per check', async () => {
+    const checker = new RenderChecker();
+    try {
+      await checker.check('warm up');
+      const started = performance.now();
+      for (let i = 0; i < 5; i += 1) {
+        expect(await checker.check(`## Save ${String(i)}\n\nA body.`)).toMatchObject({ ok: true });
+      }
+      // Five fresh workers would cost seconds; five checks on a warm one, milliseconds.
+      expect(performance.now() - started).toBeLessThan(250);
+    } finally {
+      await checker.close();
+    }
+  });
+
+  it('recovers from a hostile body: the next check gets a fresh worker and passes', async () => {
+    const checker = new RenderChecker();
+    try {
+      const [hostile, after] = await Promise.all([
+        checker.check(slow, { timeoutMs: 300 }),
+        checker.check('## After\n\nFine.'),
+      ]);
+      expect(hostile).toMatchObject({ ok: false, reason: 'timeout' });
+      expect(after).toMatchObject({ ok: true, words: 2 });
+    } finally {
+      await checker.close();
+    }
+  });
+
+  it('answers each check with its own result, in order', async () => {
+    const checker = new RenderChecker();
+    try {
+      const results = await Promise.all(
+        [1, 2, 3, 4].map((n) => checker.check(Array.from({ length: n }, () => 'word').join(' '))),
+      );
+      expect(results.map((r) => (r.ok ? r.words : -1))).toEqual([1, 2, 3, 4]);
+    } finally {
+      await checker.close();
+    }
+  });
+
+  it('settles pending checks when closed', async () => {
+    const checker = new RenderChecker();
+    const pending = checker.check(slow, { timeoutMs: 5000 });
+    await checker.close();
+    expect(await pending).toMatchObject({ ok: false, reason: 'crash' });
   });
 });

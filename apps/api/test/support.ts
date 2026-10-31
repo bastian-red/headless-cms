@@ -123,10 +123,23 @@ export async function call<T = unknown>(
   harness: Harness,
   method: string,
   path: string,
-  options: { user?: SessionUser | null; body?: unknown; secret?: string; address?: string } = {},
+  options: {
+    user?: SessionUser | null;
+    body?: unknown;
+    secret?: string;
+    address?: string;
+    /** A raw bearer credential (a content API key). Overrides `user`. */
+    bearer?: string;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<Reply<T>> {
-  const headers: Record<string, string> = { 'x-forwarded-for': options.address ?? randomAddress() };
-  if (options.user !== null && options.user !== undefined) {
+  const headers: Record<string, string> = {
+    'x-forwarded-for': options.address ?? randomAddress(),
+    ...options.headers,
+  };
+  if (options.bearer !== undefined) {
+    headers.authorization = `Bearer ${options.bearer}`;
+  } else if (options.user !== null && options.user !== undefined) {
     headers.authorization = `Bearer ${mintServiceToken(options.user, options.secret ?? AUTH_SECRET)}`;
   }
   if (options.body !== undefined) headers['content-type'] = 'application/json';
@@ -134,6 +147,8 @@ export async function call<T = unknown>(
   const response = await fetch(`${harness.base}${path}`, {
     method,
     headers,
+    // A 308 is an answer under test, not something to follow.
+    redirect: 'manual',
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   });
   const text = await response.text();
@@ -144,4 +159,84 @@ export async function call<T = unknown>(
     body = text;
   }
   return { status: response.status, body: body as T, headers: response.headers, text };
+}
+
+/** A content API key, made the way the studio makes one (through the API). */
+export async function newApiKey(
+  harness: Harness,
+  admin: SessionUser,
+  name = 'integration',
+): Promise<string> {
+  const r = await call<{ key: string }>(harness, 'POST', '/studio/api-keys', {
+    user: admin,
+    body: { name },
+  });
+  if (r.status !== 201) throw new Error(`could not create an API key: ${r.status} ${r.text}`);
+  return r.body.key;
+}
+
+export interface PostReply {
+  id: string;
+  slug: string;
+  status: string;
+  live: boolean;
+  headRevisionId: string;
+  publishedRevisionId: string | null;
+  publishedAt: string | null;
+  scheduledFor: string | null;
+  transitions: string[];
+  head: { id: string; number: number; title: string; body: string; tags: { slug: string }[] };
+}
+
+/** A post with a unique slug, created through the studio API. */
+export async function newPost(
+  harness: Harness,
+  author: SessionUser,
+  fields: Record<string, unknown> = {},
+): Promise<PostReply> {
+  const r = await call<PostReply>(harness, 'POST', '/studio/posts', {
+    user: author,
+    body: {
+      title: 'Integration post',
+      slug: `it-${randomUUID().slice(0, 8)}`,
+      excerpt: 'An excerpt.',
+      body: '## Hello\n\nA body.',
+      ...fields,
+    },
+  });
+  if (r.status !== 201) throw new Error(`could not create a post: ${r.status} ${r.text}`);
+  return r.body;
+}
+
+/** One workflow transition from the head the caller last saw. */
+export function transition(
+  harness: Harness,
+  user: SessionUser,
+  post: Pick<PostReply, 'id' | 'headRevisionId'>,
+  action: string,
+  extra: Record<string, unknown> = {},
+) {
+  return call<PostReply>(harness, 'POST', `/studio/posts/${post.id}/transitions`, {
+    user,
+    body: { action, revisionId: post.headRevisionId, ...extra },
+  });
+}
+
+/**
+ * Every route the Express router actually serves, as `METHOD /path`, read
+ * from the running app rather than from a list someone keeps. The coverage
+ * checks compare their own tables against this, so a route added without a
+ * row in them fails the lane.
+ */
+export function routes(harness: Harness): string[] {
+  const express = harness.app.getHttpAdapter().getInstance() as {
+    _router: { stack: { route?: { path: string; methods: Record<string, boolean> } }[] };
+  };
+  return express._router.stack
+    .flatMap((layer) =>
+      layer.route === undefined
+        ? []
+        : Object.keys(layer.route.methods).map((m) => `${m.toUpperCase()} ${layer.route!.path}`),
+    )
+    .sort();
 }

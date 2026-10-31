@@ -74,3 +74,16 @@ describe('trackerFor', () => {
     expect(trackerFor({ user: undefined, ip: '203.0.113.9' })).toBe('ip:203.0.113.9');
   });
 });
+
+describe('trackerFor, content API', () => {
+  it('counts a content API client per key, not per address', () => {
+    expect(trackerFor({ user: undefined, ip: '10.0.0.5', apiKey: { id: 'ckey1' } })).toBe(
+      'key:ckey1',
+    );
+  });
+
+  it('prefers the signed-in user when both are present', () => {
+    const user = { id: 'cuser1', email: 'a@b.co', name: 'A', role: 'AUTHOR' as const };
+    expect(trackerFor({ user, ip: '10.0.0.5', apiKey: { id: 'ckey1' } })).toBe('user:cuser1');
+  });
+});

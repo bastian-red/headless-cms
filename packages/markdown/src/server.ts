@@ -41,53 +41,152 @@ const WORKER = new URL('./worker.js', import.meta.url);
  */
 export const STARTUP_LIMIT_MS = 15_000;
 
-export function checkRenderable(
-  markdown: string,
-  { timeoutMs = RENDER_BUDGET_MS }: { timeoutMs?: number } = {},
-): Promise<RenderCheck> {
-  return new Promise((resolve) => {
+interface Job {
+  readonly id: number;
+  readonly markdown: string;
+  readonly timeoutMs: number;
+  readonly resolve: (result: RenderCheck) => void;
+}
+
+/**
+ * One long-lived worker that checks bodies in order.
+ *
+ * Starting a thread and loading the parser costs about 500 ms, which a save
+ * should pay once per process, not once per keystroke-driven autosave. Checks
+ * queue, and each one's deadline starts when it reaches the worker, so a slow
+ * body delays the saves behind it by at most one budget. A timeout or a crash
+ * terminates the worker; the next check starts a fresh one, so a hostile body
+ * cannot poison the checker for anybody after it.
+ */
+export class RenderChecker {
+  private worker: Worker | null = null;
+  private ready: Promise<void> | null = null;
+  private readonly queue: Job[] = [];
+  private running: Job | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private nextId = 1;
+  private closed = false;
+
+  check(
+    markdown: string,
+    { timeoutMs = RENDER_BUDGET_MS }: { timeoutMs?: number } = {},
+  ): Promise<RenderCheck> {
+    if (this.closed) return Promise.reject(new Error('RenderChecker is closed'));
+    return new Promise((resolve) => {
+      this.queue.push({ id: this.nextId++, markdown, timeoutMs, resolve });
+      this.pump();
+    });
+  }
+
+  /** Stops the worker. Pending checks resolve as crashes. */
+  async close(): Promise<void> {
+    this.closed = true;
+    for (const job of this.queue.splice(0)) {
+      job.resolve({ ok: false, reason: 'crash', detail: 'the render checker was closed' });
+    }
+    const worker = this.worker;
+    this.discard();
+    this.finish({ ok: false, reason: 'crash', detail: 'the render checker was closed' });
+    if (worker !== null) await worker.terminate();
+  }
+
+  private pump(): void {
+    if (this.running !== null || this.queue.length === 0) return;
+    const job = this.queue.shift()!;
+    this.running = job;
+    void this.start().then(
+      () => {
+        if (this.running !== job) return;
+        this.timer = setTimeout(() => {
+          // Detach first: the next job must go to a fresh worker, not to this
+          // one, which is still busy with the body that ran out of time.
+          this.discard();
+          this.finish({
+            ok: false,
+            reason: 'timeout',
+            detail: `did not render within ${String(job.timeoutMs)} ms`,
+          });
+        }, job.timeoutMs);
+        this.worker?.postMessage({ id: job.id, markdown: job.markdown });
+      },
+      (error: unknown) => {
+        this.discard();
+        this.finish({ ok: false, reason: 'crash', detail: String(error) });
+      },
+    );
+  }
+
+  /** The worker, started if there is none, resolved once it reports ready. */
+  private start(): Promise<void> {
+    if (this.ready !== null) return this.ready;
     const worker = new Worker(WORKER, {
-      workerData: { markdown },
       // Not the host's flags: a loader or `--input-type` meant for the parent
       // makes the worker fail to start, which would read as "crash" for every body.
       execArgv: [],
       // A worker cannot take the server's memory with it.
       resourceLimits: { maxOldGenerationSizeMb: 256 },
     });
-    let settled = false;
-    const settle = (result: RenderCheck): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      void worker.terminate();
-      resolve(result);
-    };
-    let timer = setTimeout(() => {
-      settle({
-        ok: false,
-        reason: 'crash',
-        detail: `worker did not start within ${String(STARTUP_LIMIT_MS)} ms`,
+    this.worker = worker;
+    this.ready = new Promise<void>((resolve, reject) => {
+      const startup = setTimeout(
+        () => reject(new Error(`worker did not start within ${String(STARTUP_LIMIT_MS)} ms`)),
+        STARTUP_LIMIT_MS,
+      );
+      worker.on('message', (message: ({ id: number } & RenderCheck) | { ready: true }) => {
+        if ('ready' in message) {
+          clearTimeout(startup);
+          resolve();
+          return;
+        }
+        if (this.running?.id !== message.id) return;
+        const { id: _id, ...result } = message;
+        this.finish(result as RenderCheck);
       });
-    }, STARTUP_LIMIT_MS);
-    worker.on('message', (message: RenderCheck | { ready: true }) => {
-      if (!('ready' in message)) {
-        settle(message);
-        return;
-      }
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        settle({
-          ok: false,
-          reason: 'timeout',
-          detail: `did not render within ${String(timeoutMs)} ms`,
-        });
-      }, timeoutMs);
+      const fail = (detail: string): void => {
+        clearTimeout(startup);
+        reject(new Error(detail));
+        if (this.worker === worker) {
+          this.finish({ ok: false, reason: 'crash', detail });
+          this.worker = null;
+          this.ready = null;
+        }
+      };
+      worker.once('error', (error) => fail(`${error.name}: ${error.message}`));
+      worker.once('exit', (code) => fail(`worker exited with code ${String(code)}`));
     });
-    worker.once('error', (error) =>
-      settle({ ok: false, reason: 'crash', detail: `${error.name}: ${error.message}` }),
-    );
-    worker.once('exit', (code) =>
-      settle({ ok: false, reason: 'crash', detail: `worker exited with code ${String(code)}` }),
-    );
-  });
+    // A rejection is handled by pump(); this keeps a startup failure while no
+    // job waits from becoming an unhandled rejection.
+    this.ready.catch(() => undefined);
+    return this.ready;
+  }
+
+  private finish(result: RenderCheck): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+    const job = this.running;
+    this.running = null;
+    job?.resolve(result);
+    if (!this.closed) this.pump();
+  }
+
+  /** Forgets the current worker (terminating it in the background); the next job starts a new one. */
+  private discard(): void {
+    const worker = this.worker;
+    this.worker = null;
+    this.ready = null;
+    if (worker !== null) void worker.terminate();
+  }
+}
+
+/** A one-off check in its own worker. A server keeps a `RenderChecker` instead. */
+export async function checkRenderable(
+  markdown: string,
+  options: { timeoutMs?: number } = {},
+): Promise<RenderCheck> {
+  const checker = new RenderChecker();
+  try {
+    return await checker.check(markdown, options);
+  } finally {
+    await checker.close();
+  }
 }

@@ -52,6 +52,11 @@ node scripts/db-drift.mjs
 echo "integration: database guarantees"
 pnpm --filter @cms/db exec vitest run --config vitest.integration.config.ts
 
+# The API suites read the demo newsroom (redirects, a taken-down post, the
+# canaries), so it is loaded here. The seed only rewrites its own rows.
+echo "integration: seed"
+pnpm --filter @cms/db exec tsx prisma/seed.mts >/dev/null
+
 echo "integration: API"
 if [[ $# -gt 0 ]]; then
   pnpm --filter @cms/api exec vitest run --config vitest.integration.config.ts "$@"

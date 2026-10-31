@@ -1,5 +1,6 @@
 /**
- * The three things every feature module needs: the config, Postgres, Redis.
+ * What every feature module needs: the config, Postgres, Redis, and the
+ * markdown renderer (a worker thread with a lifecycle, like a connection).
  *
  * `@Global()`, which this codebase otherwise avoids. The justification is narrow
  * and worth stating: these are process-level singletons with a lifecycle, and the
@@ -11,6 +12,7 @@
 import { Global, Module } from '@nestjs/common';
 
 import { API_CONFIG, loadConfig, type ApiConfig } from '../config/config';
+import { MarkdownService } from './markdown.service';
 import { PrismaService } from './prisma.service';
 import { RedisService } from './redis.service';
 
@@ -26,7 +28,8 @@ import { RedisService } from './redis.service';
     },
     PrismaService,
     RedisService,
+    MarkdownService,
   ],
-  exports: [API_CONFIG, PrismaService, RedisService],
+  exports: [API_CONFIG, PrismaService, RedisService, MarkdownService],
 })
 export class InfraModule {}
