@@ -13,6 +13,8 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from '@asteasolutions/zod-to-openapi';
 import {
   slugSchema,
+  v1CommentListSchema,
+  v1CommentQuerySchema,
   v1ErrorSchema,
   v1MovedSchema,
   v1PostListSchema,
@@ -28,6 +30,7 @@ import {
 export const DOCUMENTED_ROUTES = [
   'GET /v1/posts',
   'GET /v1/posts/{slug}',
+  'GET /v1/posts/{slug}/comments',
   'GET /v1/search',
   'GET /v1/tags',
 ] as const;
@@ -57,6 +60,7 @@ export function openApiDocument() {
   const Post = v1PostSchema.meta({ id: 'Post' });
   const TagList = v1TagListSchema.meta({ id: 'TagList' });
   const SearchResult = v1SearchResultSchema.meta({ id: 'SearchResult' });
+  const CommentList = v1CommentListSchema.meta({ id: 'CommentList' });
 
   registry.registerPath({
     method: 'get',
@@ -81,6 +85,22 @@ export function openApiDocument() {
       308: json(v1MovedSchema, 'An old slug: `Location` and `slug` name the current one.'),
       404: json(v1ErrorSchema, 'No live post has ever had this address.'),
       410: json(v1ErrorSchema, 'The post was public and has been taken down.'),
+      ...errors,
+    },
+  });
+  registry.registerPath({
+    method: 'get',
+    path: '/v1/posts/{slug}/comments',
+    summary: "Readers' comments on a live post that an editor approved, oldest first",
+    description:
+      'Plain text: render `body` as text, split into paragraphs on blank lines. Pending, rejected ' +
+      'and spam comments are never returned.',
+    security,
+    request: { params: z.object({ slug: slugSchema }), query: v1CommentQuerySchema },
+    responses: {
+      200: json(CommentList, 'A page of approved comments.'),
+      400: json(v1ErrorSchema, 'A bad query or cursor.'),
+      404: json(v1ErrorSchema, 'No live post has this address (old slugs included).'),
       ...errors,
     },
   });

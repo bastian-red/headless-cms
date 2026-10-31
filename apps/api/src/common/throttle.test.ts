@@ -3,6 +3,8 @@ import type { ExecutionContext } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 
 import type { ApiConfig } from '../config/config';
+import { addressHash } from '@cms/shared/server';
+
 import { Budget, budgetOf, throttlers, trackerFor } from './throttle';
 
 @Controller()
@@ -59,6 +61,8 @@ describe('throttlers', () => {
   });
 });
 
+const SECRET = 's'.repeat(32);
+
 describe('trackerFor', () => {
   it('counts signed-in calls per user, because they all arrive from the web server', () => {
     const user = {
@@ -67,23 +71,28 @@ describe('trackerFor', () => {
       name: 'A',
       role: 'AUTHOR' as const,
     };
-    expect(trackerFor({ user, ip: '10.0.0.5' })).toBe('user:cuser000000000000000001');
+    expect(trackerFor({ user, ip: '10.0.0.5' }, SECRET)).toBe('user:cuser000000000000000001');
   });
 
-  it('counts anonymous calls per address', () => {
-    expect(trackerFor({ user: undefined, ip: '203.0.113.9' })).toBe('ip:203.0.113.9');
+  it('counts anonymous calls per address, keyed by its hash so Redis never holds the address', () => {
+    const tracker = trackerFor({ user: undefined, ip: '203.0.113.9' }, SECRET);
+    expect(tracker).toBe(`ip:${addressHash(SECRET, '203.0.113.9')}`);
+    expect(tracker).not.toContain('203.0.113.9');
+    expect(trackerFor({ user: undefined, ip: '203.0.113.10' }, SECRET)).not.toBe(tracker);
   });
 });
 
 describe('trackerFor, content API', () => {
   it('counts a content API client per key, not per address', () => {
-    expect(trackerFor({ user: undefined, ip: '10.0.0.5', apiKey: { id: 'ckey1' } })).toBe(
+    expect(trackerFor({ user: undefined, ip: '10.0.0.5', apiKey: { id: 'ckey1' } }, SECRET)).toBe(
       'key:ckey1',
     );
   });
 
   it('prefers the signed-in user when both are present', () => {
     const user = { id: 'cuser1', email: 'a@b.co', name: 'A', role: 'AUTHOR' as const };
-    expect(trackerFor({ user, ip: '10.0.0.5', apiKey: { id: 'ckey1' } })).toBe('user:cuser1');
+    expect(trackerFor({ user, ip: '10.0.0.5', apiKey: { id: 'ckey1' } }, SECRET)).toBe(
+      'user:cuser1',
+    );
   });
 });

@@ -4,11 +4,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, permanentRedirect } from 'next/navigation';
 
+import { CommentForm } from '../../../../components/comment-form';
+import { Comments } from '../../../../components/comments';
 import { JsonLd } from '../../../../components/json-ld';
 import { PostByline } from '../../../../components/post-list';
 import { appBaseUrl, contentAtBuild } from '../../../../lib/config';
 import { longDate } from '../../../../lib/dates';
-import { allPosts, postBySlug } from '../../../../lib/content';
+import { submitComment } from '../../../../lib/comment-action';
+import { allPosts, approvedComments, postBySlug } from '../../../../lib/content';
 import {
   absolute,
   alternatesFor,
@@ -28,6 +31,10 @@ import {
  *
  * An old slug answers 308 to the current one (the API keeps every rename);
  * a slug that never existed, or a post taken down, is a 404.
+ *
+ * The approved comments render inside the same static page, from their own
+ * read tagged `comments:<slug>`, so an editor's decision refreshes this page
+ * through the publisher's webhook and no reader's browser fetches anything.
  */
 export const revalidate = 3600;
 export const dynamicParams = true;
@@ -82,13 +89,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function PostPage({ params }: Props) {
   const post = await load((await params).slug);
-  const rendered = render(post.body);
+  const [rendered, comments] = [render(post.body), await approvedComments(post.slug)];
   const url = paths.post(post.slug);
   // headline is the article's own title; the SEO title is for <title> and cards.
   const facts = { ...post, description: describe(post.seoDescription ?? post.excerpt) };
   return (
     <main id="main" className="page">
-      <JsonLd data={blogPosting(appBaseUrl, facts, absolute(appBaseUrl, paths.card(post.slug)))} />
+      <JsonLd
+        data={blogPosting(
+          appBaseUrl,
+          { ...facts, commentCount: comments.length },
+          absolute(appBaseUrl, paths.card(post.slug)),
+        )}
+      />
       <JsonLd
         data={breadcrumbs(appBaseUrl, [
           { name: 'Home', path: paths.home },
@@ -138,6 +151,10 @@ export default async function PostPage({ params }: Props) {
         ) : null}
         <div className="prose">{toReact(rendered.tree)}</div>
       </article>
+      <section className="comments" aria-labelledby="comments-title">
+        <Comments comments={comments} />
+        <CommentForm postSlug={post.slug} action={submitComment} />
+      </section>
     </main>
   );
 }

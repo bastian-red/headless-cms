@@ -7,7 +7,7 @@ import 'server-only';
  * **Cached reads, tagged with the shared contract.** Every read the public
  * pages make is a `force-cache` fetch tagged with names from
  * `@cms/shared`'s revalidation contract (`posts`, `post:<slug>`,
- * `tag:<slug>`, `author:<id>`). The API's revalidation events carry the same
+ * `tag:<slug>`, `author:<id>`, `comments:<slug>`). The API's revalidation events carry the same
  * names, so a publish invalidates exactly the pages that show it, and the
  * pages themselves stay prerendered (scripts/render-check.mjs holds that).
  * `REVALIDATE_SECONDS` is the safety net if an event is ever lost.
@@ -25,13 +25,16 @@ import 'server-only';
 import {
   POSTS_TAG,
   authorTag,
+  commentsTag,
   postTag,
   tagTag,
+  v1CommentListSchema,
   v1MovedSchema,
   v1PostListSchema,
   v1PostSchema,
   v1SearchResultSchema,
   v1TagListSchema,
+  type V1Comment,
   type V1Post,
   type V1PostSummary,
 } from '@cms/shared';
@@ -190,4 +193,26 @@ export async function search(q: string, cursor?: string) {
     throw new ContentError(response.status, `${path} answered ${String(response.status)}.`);
   }
   return parse(response, path, v1SearchResultSchema);
+}
+
+/**
+ * The approved comments under a post, oldest first, every page. Tagged
+ * `comments:<slug>` alone: an editor's decision refreshes the comments block
+ * and the page around it, and the post's own read stays cached.
+ */
+export async function approvedComments(slug: string): Promise<V1Comment[]> {
+  const comments: V1Comment[] = [];
+  let cursor: string | null = null;
+  do {
+    const query = new URLSearchParams({ limit: '100' });
+    if (cursor !== null) query.set('cursor', cursor);
+    const page = await read(
+      `/v1/posts/${encodeURIComponent(slug)}/comments?${query.toString()}`,
+      v1CommentListSchema,
+      { tags: [commentsTag(slug)] },
+    );
+    comments.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return comments;
 }

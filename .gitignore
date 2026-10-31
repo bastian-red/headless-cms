@@ -42,3 +42,6 @@ e2e/demo-shots/
 # `pnpm dev`. Next's own templates ignore it; typecheck passes without it.
 apps/web/next-env.d.ts
 
+
+# A red-proofs.mjs backup, present only while a proof runs (or after a killed run).
+*.red-proof-orig

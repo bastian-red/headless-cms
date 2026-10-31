@@ -19,12 +19,12 @@ function patterns(node: unknown, path = '$'): [string, string][] {
 }
 
 describe('openApiDocument', () => {
-  it('names the four response schemas as components', () => {
+  it('names the five response schemas as components', () => {
     // zod 4 copies methods onto each schema when it is built, so the old
     // prototype patch (registry.register) reached none of ours; the names
     // now come from .meta({ id }).
     const names = Object.keys(openApiDocument().components?.schemas ?? {}).sort();
-    expect(names).toEqual(['Post', 'PostList', 'SearchResult', 'TagList']);
+    expect(names).toEqual(['CommentList', 'Post', 'PostList', 'SearchResult', 'TagList']);
   });
 
   it('emits every pattern as a bare ECMA-262 source, without regex flags', () => {

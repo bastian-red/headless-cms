@@ -10,3 +10,4 @@ export * from './service-token';
 export * from './api-key';
 export * from './connection-log';
 export * from './webhook';
+export * from './address';

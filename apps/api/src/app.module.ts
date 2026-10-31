@@ -23,6 +23,8 @@ import { ApiKeysController } from './api-keys/api-keys.controller';
 import { AuthService } from './auth/auth.service';
 import { ActorGuard } from './common/actor.guard';
 import { ApiKeyGuard } from './common/api-key.guard';
+import { CommentsController } from './comments/comments.controller';
+import { CommentsService } from './comments/comments.service';
 import { ContentController } from './content/content.controller';
 import { ContentService } from './content/content.service';
 import { DomainErrorFilter } from './common/domain-error.filter';
@@ -58,12 +60,14 @@ import { UsersController } from './users/users.controller';
     UsersController,
     ApiKeysController,
     ContentController,
+    CommentsController,
   ],
   providers: [
     AuthService,
     HealthService,
     PostsService,
     ContentService,
+    CommentsService,
     // Registration order is execution order.
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: ApiKeyGuard },

@@ -8,7 +8,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expect, test as base, type Page } from '@playwright/test';
+import type { SessionUser } from '@cms/shared';
+import { mintServiceToken } from '@cms/shared/server';
+import { expect, test as base, type APIRequestContext, type Page } from '@playwright/test';
 
 const SEED = readFileSync(join(__dirname, '..', 'packages', 'db', 'prisma', 'seed.mts'), 'utf8');
 
@@ -129,3 +131,58 @@ export const test = base.extend<{ failOnPageError: void }>({
   ],
 });
 export { expect };
+
+// --- the API, as the studio uses it, and the public pages as a reader gets them ----
+
+/** How fast an editor's action must reach the cached public pages. */
+export const WITHIN_MS = 5_000;
+
+/** The editor, signed in against the API the way the web app does it, as a service token. */
+export async function editorToken(request: APIRequestContext): Promise<string> {
+  const response = await request.post(`${API_BASE_URL}/auth/sign-in`, {
+    data: { email: PEOPLE.editor.email, password: PEOPLE.editor.password },
+    headers: { 'x-forwarded-for': randomAddress() },
+  });
+  expect(response.status(), await response.text()).toBe(200);
+  const user = (await response.json()) as SessionUser;
+  const secret = process.env.AUTH_SECRET;
+  if (secret === undefined)
+    throw new Error('AUTH_SECRET is not set; run through ./scripts/e2e.sh.');
+  return mintServiceToken(user, secret);
+}
+
+/** One studio API call with a service token, asserting the status it must answer. */
+export async function studio<T>(
+  request: APIRequestContext,
+  token: string,
+  path: string,
+  data: Record<string, unknown> | null,
+  expected: number,
+): Promise<T> {
+  const headers = { authorization: `Bearer ${token}` };
+  const response =
+    data === null
+      ? await request.get(`${API_BASE_URL}${path}`, { headers })
+      : await request.post(`${API_BASE_URL}${path}`, { data, headers });
+  expect(response.status(), `${path}: ${await response.text()}`).toBe(expected);
+  return (await response.json()) as T;
+}
+
+/** The text of a public page, as a reader (or a crawler) gets it. */
+export async function page(request: APIRequestContext, path: string) {
+  const response = await request.get(path, { maxRedirects: 0 });
+  return { status: response.status(), text: await response.text() };
+}
+
+/** Poll until `check` holds, failing if that takes longer than WITHIN_MS. Returns the time it took. */
+export async function within(check: () => Promise<boolean>, what: string): Promise<number> {
+  const started = Date.now();
+  await expect
+    .poll(check, {
+      message: `${what} within ${String(WITHIN_MS)} ms`,
+      timeout: WITHIN_MS,
+      intervals: [200],
+    })
+    .toBe(true);
+  return Date.now() - started;
+}

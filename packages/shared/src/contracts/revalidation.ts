@@ -11,15 +11,18 @@ import { z } from 'zod';
  * - `post:<slug>`: one post page. A rename names both slugs.
  * - `tag:<slug>`: one tag page.
  * - `author:<id>`: one author page.
+ * - `comments:<slug>`: the approved comments under one post. An editor's
+ *   decision revalidates only this, so the post's own read stays cached.
  */
 export const POSTS_TAG = 'posts';
 export const postTag = (slug: string): string => `post:${slug}`;
 export const tagTag = (slug: string): string => `tag:${slug}`;
 export const authorTag = (id: string): string => `author:${id}`;
+export const commentsTag = (slug: string): string => `comments:${slug}`;
 
 export const cacheTagSchema = z
   .string()
-  .regex(/^(posts|post:[a-z0-9-]+|tag:[a-z0-9-]+|author:[a-z0-9]+)$/u);
+  .regex(/^(posts|post:[a-z0-9-]+|tag:[a-z0-9-]+|author:[a-z0-9]+|comments:[a-z0-9-]+)$/u);
 
 /** The webhook body the publisher delivers to `POST /api/revalidate` (step 7). */
 export const revalidationPayloadSchema = z.object({

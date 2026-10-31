@@ -21,11 +21,17 @@
  * by address: the web app forwards the browser's address in
  * `x-forwarded-for` and `trust proxy` is one hop. Counters are per budget, not
  * per route, so splitting a flood across two routes buys nothing.
+ *
+ * **An address is never a key in the clear.** It is `addressHash` (a keyed
+ * HMAC, the same one a comment row stores), so Redis holds no reader's address
+ * either: the comments page promises we do not keep it, and a counter is kept.
  */
 import { SetMetadata, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { ThrottlerOptions } from '@nestjs/throttler';
 import type { Request } from 'express';
+
+import { addressHash } from '@cms/shared/server';
 
 import type { ApiConfig } from '../config/config';
 import type { RequestWithUser } from './session.guard';
@@ -50,12 +56,13 @@ export function budgetOf(context: ExecutionContext): BudgetName | undefined {
 
 export function trackerFor(
   request: Pick<RequestWithUser, 'user' | 'ip'> & { apiKey?: { readonly id: string } },
+  secret: string,
 ): string {
   if (request.user !== undefined) return `user:${request.user.id}`;
   // A content API client is keyed by its key: the public site makes every
   // request from one address, and a second frontend must not share its budget.
   if (request.apiKey !== undefined) return `key:${request.apiKey.id}`;
-  return `ip:${request.ip ?? 'unknown'}`;
+  return `ip:${addressHash(secret, request.ip ?? 'unknown')}`;
 }
 
 const MINUTE = 60_000;
@@ -64,7 +71,7 @@ export function throttlers(config: ApiConfig): ThrottlerOptions[] {
   const common = {
     ttl: MINUTE,
     getTracker: (request: Record<string, unknown>) =>
-      trackerFor(request as unknown as Request & RequestWithUser),
+      trackerFor(request as unknown as Request & RequestWithUser, config.authSecret),
     generateKey: (_context: ExecutionContext, tracker: string, name: string) =>
       `throttle:${name}:${tracker}`,
   };

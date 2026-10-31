@@ -16,14 +16,8 @@
 import { randomBytes } from 'node:crypto';
 
 import { createPrismaClient } from '@cms/db';
-import type { SessionUser } from '@cms/shared';
-import { mintServiceToken } from '@cms/shared/server';
-import type { APIRequestContext } from '@playwright/test';
 
-import { API_BASE_URL, expect, PEOPLE, randomAddress, test } from '../fixtures';
-
-/** The promise under test. */
-const WITHIN_MS = 5_000;
+import { editorToken, expect, page, studio, test, within } from '../fixtures';
 
 interface PostReply {
   id: string;
@@ -43,54 +37,6 @@ test.afterAll(async () => {
     await db.$disconnect();
   }
 });
-
-/** The editor, signed in against the API the way the web app does it, as a service token. */
-async function editorToken(request: APIRequestContext): Promise<string> {
-  const response = await request.post(`${API_BASE_URL}/auth/sign-in`, {
-    data: { email: PEOPLE.editor.email, password: PEOPLE.editor.password },
-    headers: { 'x-forwarded-for': randomAddress() },
-  });
-  expect(response.status(), await response.text()).toBe(200);
-  const user = (await response.json()) as SessionUser;
-  const secret = process.env.AUTH_SECRET;
-  if (secret === undefined)
-    throw new Error('AUTH_SECRET is not set; run through ./scripts/e2e.sh.');
-  return mintServiceToken(user, secret);
-}
-
-async function studio<T>(
-  request: APIRequestContext,
-  token: string,
-  path: string,
-  data: Record<string, unknown>,
-  expected: number,
-): Promise<T> {
-  const response = await request.post(`${API_BASE_URL}${path}`, {
-    data,
-    headers: { authorization: `Bearer ${token}` },
-  });
-  expect(response.status(), `${path}: ${await response.text()}`).toBe(expected);
-  return (await response.json()) as T;
-}
-
-/** The text of a public page, as a reader (or a crawler) gets it. */
-async function page(request: APIRequestContext, path: string) {
-  const response = await request.get(path, { maxRedirects: 0 });
-  return { status: response.status(), text: await response.text() };
-}
-
-/** Poll until `check` holds, failing if that takes longer than the promise. Returns the time it took. */
-async function within(check: () => Promise<boolean>, what: string): Promise<number> {
-  const started = Date.now();
-  await expect
-    .poll(check, {
-      message: `${what} within ${String(WITHIN_MS)} ms`,
-      timeout: WITHIN_MS,
-      intervals: [200],
-    })
-    .toBe(true);
-  return Date.now() - started;
-}
 
 test('publish, edit and take down reach the cached public pages within 5 s, without a rebuild', async ({
   request,

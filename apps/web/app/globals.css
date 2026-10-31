@@ -319,3 +319,71 @@ code,
   font-weight: 700;
   text-decoration: underline;
 }
+
+/*
+ * Comments under a post (build step 8). Plain text in the reading measure;
+ * the visual identity arrives with the design step.
+ */
+.comments {
+  max-width: var(--measure);
+  margin-block-start: calc(var(--space) * 3);
+  padding-block-start: var(--space);
+  border-block-start: 1px solid var(--border);
+}
+
+.comment-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 calc(var(--space) * 2);
+}
+
+.comment {
+  padding-block: var(--space);
+  border-block-end: 1px solid var(--border);
+}
+
+.comment-meta {
+  margin: 0 0 0.25rem;
+}
+
+.comment-name {
+  font-weight: 600;
+}
+
+.comment-body p {
+  margin-block: 0.5rem;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.comment-form-note,
+.field-hint {
+  font-size: 0.9rem;
+}
+
+.comment-body-input {
+  resize: vertical;
+}
+
+.field-error {
+  color: var(--danger);
+}
+
+/* Stays rendered when empty: a live region that appears with its text is not announced. */
+.comment-sent:empty {
+  margin: 0;
+}
+
+.comment-sent {
+  color: var(--ok);
+}
+
+/* The honeypot: present for a bot that fills every field, absent for everyone else. */
+.comment-honeypot {
+  position: absolute;
+  inset-inline-start: -10000px;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+}

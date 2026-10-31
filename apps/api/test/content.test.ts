@@ -14,6 +14,7 @@ import {
   v1MovedSchema,
   v1PostListSchema,
   v1PostSchema,
+  v1CommentListSchema,
   v1SearchResultSchema,
   v1TagListSchema,
   type V1PostSummary,
@@ -213,7 +214,16 @@ describe('nothing unpublished leaves the API', () => {
   it('no canary in any page, post or tag', async () => {
     const { items, replies } = await crawl('', 50);
     const bodies = replies.map((r) => r.text);
-    for (const post of items) bodies.push((await get(`/v1/posts/${post.slug}`)).text);
+    let approved = 0;
+    for (const post of items) {
+      bodies.push((await get(`/v1/posts/${post.slug}`)).text);
+      // The seed puts pending and rejected comments, canary included, next to approved ones.
+      const comments = await get(`/v1/posts/${post.slug}/comments`);
+      approved += v1CommentListSchema.parse(comments.body).items.length;
+      bodies.push(comments.text);
+    }
+    // A positive control: the crawl read real comments, so "no canary" means something.
+    expect(approved).toBeGreaterThan(0);
     bodies.push((await get('/v1/tags')).text);
     for (const q of [DRAFT_CANARY, COMMENT_CANARY, 'two years in', 'caching']) {
       const r = await get(`/v1/search?q=${encodeURIComponent(q)}`);

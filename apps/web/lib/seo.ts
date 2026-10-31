@@ -64,6 +64,8 @@ export interface PostFacts {
   readonly publishedAt: string;
   readonly revisedAt: string;
   readonly words: number;
+  /** Approved comments only: what a reader can count on the page. */
+  readonly commentCount?: number;
 }
 
 /** schema.org `BlogPosting` for one post. */
@@ -83,6 +85,7 @@ export function blogPosting(origin: string, post: PostFacts, image: string) {
     // publish went public with it (see lastChanged).
     dateModified: lastChanged(post),
     wordCount: post.words,
+    ...(post.commentCount === undefined ? {} : { commentCount: post.commentCount }),
     inLanguage: SITE.language,
     keywords: post.tags.map((tag) => tag.name),
     author: {

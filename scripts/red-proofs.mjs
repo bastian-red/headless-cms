@@ -10,13 +10,17 @@
  *
  * Each mutation must match its file exactly once (so a refactor that moves
  * the line fails here loudly instead of "proving" nothing), and the original
- * file is restored afterwards, also on Ctrl-C. Needs the datastores up, like
+ * file is restored afterwards, also on Ctrl-C. A hard kill (SIGKILL, a closed
+ * terminal) cannot run that restore, so the original is also written next to
+ * the file as `<file>.red-proof-orig` before it is broken, and the next run
+ * puts any leftover back before doing anything else. A killed run once left
+ * the outbox check deleted from posts.service.ts. Needs the datastores up, like
  * `./scripts/integration.sh`, which it calls. The publisher lane runs its
  * suite directly against cms_it, so `./scripts/integration.sh` must have run
  * once (it creates and migrates that database).
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -92,6 +96,49 @@ const PROOFS = [
     file: 'apps/api/src/common/etag.ts',
     from: "const bare = (tag: string) => tag.trim().replace(/^W\\//u, '');",
     to: 'const bare = (tag: string) => tag.trim();',
+    suite: ['unit'],
+  },
+  // --- comments (step 8) -------------------------------------------------
+  {
+    name: 'comment honeypot ignored',
+    file: 'apps/api/src/comments/comments.service.ts',
+    from: "if (honeypot !== undefined && honeypot.trim() !== '') {",
+    to: 'if (false) {',
+    suite: ['integration', 'comments'],
+  },
+  {
+    name: 'comment decision without the state the moderator saw',
+    file: 'apps/api/src/comments/comments.service.ts',
+    from: 'WHERE id = ${id} AND status = ${input.from}::"CommentStatus"',
+    to: 'WHERE id = ${id}',
+    suite: ['integration', 'comments'],
+  },
+  {
+    name: 'comment decision without its revalidation event',
+    file: 'apps/api/src/comments/comments.service.ts',
+    from: 'if (changesWhatReadersSee(input.from, input.to) && post.publishedRevisionId !== null) {',
+    to: 'if (false) {',
+    suite: ['integration', 'comments'],
+  },
+  {
+    name: 'content API lists comments nobody approved',
+    file: 'apps/api/src/comments/comments.service.ts',
+    from: "        status: 'APPROVED',\n",
+    to: '',
+    suite: ['integration', 'content'],
+  },
+  {
+    name: 'comment route without its budget',
+    file: 'apps/api/src/comments/comments.controller.ts',
+    from: "  @Budget('comment')\n",
+    to: '',
+    suite: ['integration', 'comments'],
+  },
+  {
+    name: 'anonymous rate-limit key holds the address in the clear',
+    file: 'apps/api/src/common/throttle.ts',
+    from: "return `ip:${addressHash(secret, request.ip ?? 'unknown')}`;",
+    to: "return `ip:${request.ip ?? 'unknown'}`;",
     suite: ['unit'],
   },
   // --- publisher and revalidation (step 7) -------------------------------
@@ -253,6 +300,15 @@ function run(suite) {
   };
 }
 
+const BACKUP = '.red-proof-orig';
+for (const file of new Set(PROOFS.map((p) => p.file))) {
+  const path = join(ROOT, file);
+  if (existsSync(path + BACKUP)) {
+    renameSync(path + BACKUP, path);
+    console.log(`red-proofs: restored ${file} from a run that was killed mid-proof`);
+  }
+}
+
 let restore = null;
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
@@ -271,7 +327,8 @@ for (const proof of chosen) {
     results.push({ name: proof.name, verdict: `MOVED (matches ${counts.join('/')} times)` });
     continue;
   }
-  restore = () => writeFileSync(path, original);
+  writeFileSync(path + BACKUP, original);
+  restore = () => renameSync(path + BACKUP, path);
   try {
     writeFileSync(
       path,

@@ -41,6 +41,8 @@ const MATRIX: readonly (readonly [string, Action | null])[] = [
   ['GET /studio/api-keys', 'apikey.manage'],
   ['POST /studio/api-keys', 'apikey.manage'],
   ['DELETE /studio/api-keys/:id', 'apikey.manage'],
+  ['GET /studio/comments', 'comment.moderate'],
+  ['POST /studio/comments/:id/decision', 'comment.moderate'],
 ];
 
 /** Routes that take no session: open to anyone, or to an API key. */
@@ -48,8 +50,10 @@ const NOT_SIGNED_IN = [
   'GET /health',
   'GET /status',
   'POST /auth/sign-in',
+  'POST /comments',
   'GET /v1/posts',
   'GET /v1/posts/:slug',
+  'GET /v1/posts/:slug/comments',
   'GET /v1/search',
   'GET /v1/tags',
   'GET /v1/openapi.json',

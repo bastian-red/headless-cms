@@ -6,8 +6,10 @@
 import { Controller, Get, HttpStatus, Param, Query, Res, UseInterceptors } from '@nestjs/common';
 import {
   slugSchema,
+  v1CommentQuerySchema,
   v1PostQuerySchema,
   v1SearchQuerySchema,
+  type V1CommentQuery,
   type V1Post,
   type V1PostQuery,
   type V1SearchQuery,
@@ -18,13 +20,17 @@ import { ContentApi } from '../common/api-key.guard';
 import { EtagInterceptor } from '../common/etag';
 import { Public } from '../common/session.guard';
 import { ZodPipe } from '../common/zod.pipe';
+import { CommentsService } from '../comments/comments.service';
 import { ContentService } from './content.service';
 import { openApiDocument } from './openapi';
 
 @Controller('v1')
 @UseInterceptors(EtagInterceptor)
 export class ContentController {
-  constructor(private readonly content: ContentService) {}
+  constructor(
+    private readonly content: ContentService,
+    private readonly comments: CommentsService,
+  ) {}
 
   @ContentApi()
   @Get('posts')
@@ -43,6 +49,16 @@ export class ContentController {
     if (found.kind === 'post') return found.post;
     response.status(HttpStatus.PERMANENT_REDIRECT).setHeader('Location', `/v1/posts/${found.slug}`);
     return { code: 'MOVED', slug: found.slug };
+  }
+
+  /** Approved comments on a live post, oldest first. Nothing pending or refused has a field here. */
+  @ContentApi()
+  @Get('posts/:slug/comments')
+  postComments(
+    @Param('slug', new ZodPipe(slugSchema)) slug: string,
+    @Query(new ZodPipe(v1CommentQuerySchema)) query: V1CommentQuery,
+  ) {
+    return this.comments.approved(slug, query);
   }
 
   @ContentApi()
