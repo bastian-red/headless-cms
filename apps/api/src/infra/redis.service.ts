@@ -38,7 +38,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     const connection = new ConnectionLog({
       write: (line) => {
         if (line.event === 'up')
-          console.log(`[api] redis is back after ${String(Math.round(line.downForMs / 1000))} s`);
+          console.info(`[api] redis is back after ${String(Math.round(line.downForMs / 1000))} s`);
         else
           console.error(
             line.event === 'down'

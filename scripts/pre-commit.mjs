@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pre-commit gate. Seven checks, all mandatory, none skippable with --no-verify
+ * Pre-commit gate. Eight checks, all mandatory, none skippable with --no-verify
  * without also skipping the others:
  *
  *   1. gitleaks protect --staged  — secret detection is deterministic work, so it
@@ -21,6 +21,7 @@
  *      a wait that returns at once brings back the 500 on the first page.
  *   5. frozen lockfile           — CI installs with --frozen-lockfile, so a
  *      package.json the lockfile does not match fails every CI job at install.
+ *   5b. eslint                    — the same config CI's quality job runs.
  *   6. pnpm test                  — the gate lane only (fast, no network, no DB).
  *
  * Integration, load and E2E are deliberately NOT here: they need Postgres,
@@ -106,6 +107,15 @@ const steps = [
     name: 'prettier (format check, same globs as CI)',
     cmd: 'pnpm',
     args: ['exec', 'prettier', '--check', '--log-level', 'warn', '**/*.{ts,tsx,js,cjs,mjs,json}'],
+    required: true,
+  },
+  {
+    // CI's quality job runs ESLint too. Without it here, a console.log in the
+    // API went green on every local lane and red on CI (283cd32). Cached, so
+    // an unchanged tree checks in about 4 s.
+    name: 'eslint (same config as CI)',
+    cmd: 'pnpm',
+    args: ['exec', 'eslint', '--cache', '--cache-location', 'node_modules/.cache/eslint/', '.'],
     required: true,
   },
   {
