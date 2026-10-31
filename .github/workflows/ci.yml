@@ -46,6 +46,7 @@ jobs:
       - run: pnpm scan:invisible
       - run: pnpm scan:self-import:self-test
       - run: node scripts/render-check.mjs --self-test
+      - run: node scripts/wait-for-api.mjs --self-test
       - run: pnpm scan:self-import
       - name: Install gitleaks
         shell: bash

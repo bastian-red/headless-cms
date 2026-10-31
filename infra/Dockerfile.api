@@ -17,7 +17,10 @@ WORKDIR /repo
 FROM base AS fetch
 # patches/ too: the lockfile names a patched dependency, and fetch refuses
 # to run without its patch file.
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+# package.json for its pnpm.supportedArchitectures: glibc binaries only. Without
+# it the store also carries the musl builds of next's compiler and sharp
+# (about 300 MB) that a bookworm image never loads.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
 # --ignore-scripts: simple-git-hooks' postinstall walks up for a package.json this
 # stage has deliberately not copied, and crashes the fetch.
@@ -29,11 +32,18 @@ COPY . .
 RUN pnpm install --frozen-lockfile --offline --ignore-scripts
 # The Prisma client is generated INTO packages/db/generated (schema.prisma says
 # why), so `pnpm deploy` below carries it along with the package.
-RUN pnpm --filter @cms/db run generate
+RUN --mount=type=cache,id=cms-deploy-cache,sharing=locked,target=/root/.cache \
+  pnpm --filter @cms/db run generate
 RUN pnpm exec turbo run build --filter=@cms/api...
 
 FROM build AS prod-deps
-RUN pnpm --filter @cms/api deploy --prod /prod/api
+# A default deploy wrote 3.5x the deployment into its layer: ~195 MB of registry
+# metadata and engine downloads into /root/.cache, plus every store file it
+# hardlinked, copied up out of the lower layer. A 12 GB Docker disk ran out.
+# So /root/.cache is a cache mount (shared by every deploy, in no layer) and
+# packages are copied from the store, which leaves the store untouched.
+RUN --mount=type=cache,id=cms-deploy-cache,sharing=locked,target=/root/.cache \
+  pnpm --filter @cms/api deploy --prod --config.package-import-method=copy /prod/api
 RUN test -f /prod/api/dist/main.js || \
   (echo "prod-deps: /prod/api/dist/main.js is missing after pnpm deploy." >&2 && exit 1)
 RUN test -d /prod/api/node_modules/@cms/db/generated/client || \

@@ -83,8 +83,8 @@ async function request(path: string, { tags }: ReadOptions): Promise<Response> {
     } catch (error) {
       throw new ContentError(
         503,
-        `The content API at ${apiBaseUrl} is unreachable (${String(error)}). A build prerenders ` +
-          'from it, so start the API first (README, "Running it").',
+        `The content API at ${apiBaseUrl} is unreachable (${String(error)}). Every public page ` +
+          'reads it: `pnpm dev` starts it, and `next build` needs it running (README, "Running it").',
       );
     }
     if (response.status !== 429 || attempt === RETRIES) return response;

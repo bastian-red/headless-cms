@@ -17,6 +17,8 @@
  *      fails on a clean checkout. Only CI would see it otherwise.
  *   4b. render-check --self-test  — the rendering-matrix checker against built
  *      manifests: a checker that stops checking would pass every build.
+ *   4c. wait-for-api --self-test  — `pnpm dev` holds Next until the API answers;
+ *      a wait that returns at once brings back the 500 on the first page.
  *   5. frozen lockfile           — CI installs with --frozen-lockfile, so a
  *      package.json the lockfile does not match fails every CI job at install.
  *   6. pnpm test                  — the gate lane only (fast, no network, no DB).
@@ -69,6 +71,12 @@ const steps = [
     name: 'render-check (self-test)',
     cmd: 'node',
     args: ['scripts/render-check.mjs', '--self-test'],
+    required: true,
+  },
+  {
+    name: 'wait-for-api (self-test)',
+    cmd: 'node',
+    args: ['scripts/wait-for-api.mjs', '--self-test'],
     required: true,
   },
   {

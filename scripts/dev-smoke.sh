@@ -115,6 +115,34 @@ wait_for() {
   tail -150 "$LOG" >&2
   exit 1
 }
+# The web port first, and the first public page served at once, with no retry.
+# Next is ready seconds before the API listens, and before scripts/wait-for-api.mjs
+# a page opened in that gap was a 500 ("content API unreachable"). The web port
+# must not open until a public page can render.
+wait_for_port() {
+  local url="$1" name="$2"
+  local i
+  for ((i = 0; i < WAIT_SECONDS * 4; i++)); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)" != "000" ]] && return 0
+    if ! kill -0 "$DEV_PID" 2>/dev/null; then
+      echo "pnpm dev exited before ${name} came up. Last 150 lines of ${LOG}:" >&2
+      tail -150 "$LOG" >&2
+      exit 1
+    fi
+    sleep 0.25
+  done
+  echo "${name} never opened ${url} within ${WAIT_SECONDS}s. Last 150 lines of ${LOG}:" >&2
+  tail -150 "$LOG" >&2
+  exit 1
+}
+echo "==> Waiting for the web port, then reading the archive on its first request"
+wait_for_port "${APP_BASE_URL}/robots.txt" web
+first="$(curl -s -w '\n%{http_code}' "${APP_BASE_URL}/posts")"
+[[ "${first##*$'\n'}" == "200" ]] && grep -qF "href=\"/posts/${LONG_FORM_SLUG}\"" <<<"$first" || {
+  tail -60 "$LOG" >&2
+  die "the first request to /posts after the web port opened was not the archive (HTTP ${first##*$'\n'}). Next started before the API listened."
+}
+
 echo "==> Waiting for api, web and publisher"
 wait_for "${API_BASE_URL}/health" api
 wait_for "${APP_BASE_URL}/sign-in" web

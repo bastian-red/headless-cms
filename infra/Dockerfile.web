@@ -3,15 +3,29 @@
 # @cms/web (Next.js 16, output: 'standalone'). Build from the REPO ROOT:
 #   docker build -f infra/Dockerfile.web -t cms-web .
 
+# base, fetch and the install below are the same instructions, in the same
+# order, as Dockerfile.api and Dockerfile.publisher, openssl included although
+# Next never needs it. BuildKit keys its cache on the instructions, so the
+# three images share one fetched store and one installed node_modules (about
+# 1 GB) instead of building two of them: a 12 GB Docker disk ran out on the
+# second copy. The runtime stage below starts from a clean image either way.
 FROM node:20-bookworm-slim AS base
+RUN apt-get update -qq \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /repo
 
 FROM base AS fetch
 # patches/ too: the lockfile names a patched dependency, and fetch refuses
 # to run without its patch file.
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+# package.json for its pnpm.supportedArchitectures: glibc binaries only. Without
+# it the store also carries the musl builds of next's compiler and sharp
+# (about 300 MB) that a bookworm image never loads.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
+# --ignore-scripts: simple-git-hooks' postinstall walks up for a package.json this
+# stage has deliberately not copied, and crashes the fetch.
 RUN pnpm fetch --ignore-scripts
 
 FROM fetch AS build

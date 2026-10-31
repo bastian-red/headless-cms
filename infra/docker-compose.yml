@@ -54,12 +54,13 @@ services:
 
   # --- The whole stack: docker compose -f infra/docker-compose.yml --profile app up --build
 
+  # Migrations and the seed run from the api image (its @cms/db carries the
+  # migrations, the seed and its content; prisma and tsx are api dependencies
+  # for this). A separate migrate image cost a second deploy and ~290 MB more,
+  # and the full build no longer fit a 12 GB Docker disk.
   migrate:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile.api
-      target: build
-    image: cms-migrate
+    image: cms-api
+    pull_policy: never
     container_name: cms-migrate
     profiles: ['app']
     env_file:
@@ -67,7 +68,7 @@ services:
     environment: &datastores
       DATABASE_URL: postgresql://cms:cms@postgres:5432/cms?schema=public
       REDIS_URL: redis://redis:6379
-    command: ['sh', '-c', 'pnpm --filter @cms/db run migrate:deploy && pnpm --filter @cms/db run seed']
+    command: ['npm', 'run', '--silent', 'db:setup']
     depends_on:
       postgres:
         condition: service_healthy
