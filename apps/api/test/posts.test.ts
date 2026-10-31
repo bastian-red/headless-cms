@@ -119,7 +119,10 @@ describe('saving a revision', () => {
     const r = await save(author, post, {
       baseRevisionId: post.headRevisionId,
       title: 'Hostile',
-      body: `${'*_'.repeat(4000)}a${'_*'.repeat(4000)}`,
+      // 32,001 characters: 26 s measured on the dev machine, about 13x the API's
+      // 2 s deadline. The 16,001-character version (6 s, 3x) rendered inside the
+      // deadline on a fast CI runner and the save landed (201).
+      body: `${'*_'.repeat(8000)}a${'_*'.repeat(8000)}`,
     });
     expect(r.status).toBe(422);
     expect(r.body).toMatchObject({ code: 'UNPROCESSABLE', details: { render: 'timeout' } });
