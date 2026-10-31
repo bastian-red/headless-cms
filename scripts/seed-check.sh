@@ -11,7 +11,9 @@
 #                   the published revision of a live post, its tags, approved
 #                   comments. The canaries ARE present in the private rows, every
 #                   workflow state exists, and every /posts/ link in a public post
-#                   points at a live post or a redirect to one.
+#                   points at a live post or a redirect to one. Search has a
+#                   document per revision, live exactly for live posts, and no
+#                   live document holds a canary.
 #   fit for later   the long-form post is at least 3,000 words, the renamed post
 #                   has its redirect, the hostile post is live.
 #

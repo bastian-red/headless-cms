@@ -35,6 +35,17 @@ export interface Fixture {
   revisions: string[];
 }
 
+/** Every post `newPost` made in this process, for `removeCreatedPosts()`. */
+const created: string[] = [];
+
+/**
+ * Delete the posts this suite made (revisions and documents cascade), so live
+ * fixtures do not pile up in cms_it from one run to the next.
+ */
+export async function removeCreatedPosts(): Promise<void> {
+  await db.post.deleteMany({ where: { id: { in: created.splice(0) } } });
+}
+
 /**
  * A post with `count` revisions in one transaction, the way the API will write
  * it: the post first with no head, then its revisions, then the head pointer.
@@ -60,6 +71,7 @@ export async function newPost(count = 1, authorId?: string): Promise<Fixture> {
       revisions.push(revision.id);
     }
     await tx.post.update({ where: { id: post.id }, data: { headRevisionId: revisions.at(-1)! } });
+    created.push(post.id);
     return { postId: post.id, slug, authorId: author, revisions };
   });
 }

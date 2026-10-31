@@ -20,6 +20,8 @@
     "db:seed": "./scripts/with-env.sh turbo run seed --filter=@cms/db",
     "db:drift": "./scripts/db-drift.sh",
     "db:seed-check": "./scripts/seed-check.sh",
+    "search:reindex": "turbo run build --filter=@cms/search... --output-logs=errors-only && ./scripts/with-env.sh pnpm --filter @cms/search reindex",
+    "search:bench": "turbo run build --filter=@cms/search... --output-logs=errors-only && ./scripts/with-env.sh node scripts/search-bench.mjs",
     "env:contract": "node scripts/env-contract.mjs",
     "env:contract:self-test": "node scripts/env-contract.mjs --self-test",
     "scan:invisible": "node scripts/invisible-chars.mjs",

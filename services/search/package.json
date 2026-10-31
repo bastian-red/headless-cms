@@ -1,0 +1,33 @@
+{
+  "name": "@cms/search",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Full-text search over published revisions: the Postgres query, ranking, snippets as data, keyset cursors, and the reindex command.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "reindex": "node dist/bin/reindex.js"
+  },
+  "dependencies": {
+    "@cms/db": "workspace:*",
+    "@cms/markdown": "workspace:*",
+    "@cms/shared": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cms/config": "workspace:*",
+    "@types/node": "^20.17.6",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

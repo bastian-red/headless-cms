@@ -121,6 +121,8 @@ jobs:
       # Seeds twice and digests both runs, then checks no canary is public.
       - run: ./scripts/seed-check.sh
       - run: ./scripts/integration.sh
+      # p95 < 50 ms over 2,000 published posts, through the function /v1/search calls.
+      - run: pnpm search:bench
 
   dev-smoke:
     # Deliberately NO job-level datastore env reaching the app: the point of

@@ -17,9 +17,19 @@ import {
   REVISION_RESTORED_SAME_POST,
   SLUG_REDIRECT_NOT_LIVE,
 } from '../src/constraints';
-import { db, names, newPost, newUser, publish, refused, suffix } from './support';
+import {
+  db,
+  names,
+  newPost,
+  newUser,
+  publish,
+  refused,
+  removeCreatedPosts,
+  suffix,
+} from './support';
 
 afterAll(async () => {
+  await removeCreatedPosts();
   await db.$disconnect();
 });
 
@@ -360,5 +370,84 @@ describe('a redirect never shadows a live slug', () => {
     );
     const post = await db.post.findUniqueOrThrow({ where: { id: renamed.postId } });
     expect(post.slug).toBe(renamed.slug);
+  });
+});
+
+describe('search documents know whether readers can see them', () => {
+  /** A document for each of the post's revisions, the way the API writes one. */
+  async function index(post: { revisions: string[] }): Promise<void> {
+    for (const revisionId of post.revisions) {
+      await db.searchDocument.create({
+        data: { revisionId, title: 'T', excerpt: '', body: `words ${suffix()}` },
+      });
+    }
+  }
+  const live = async (revisionIds: string[]) =>
+    (
+      await db.searchDocument.findMany({
+        where: { revisionId: { in: revisionIds } },
+        select: { revisionId: true, live: true },
+      })
+    )
+      .sort((a, b) => revisionIds.indexOf(a.revisionId) - revisionIds.indexOf(b.revisionId))
+      .map((d) => d.live);
+
+  it('follows publish and unpublish', async () => {
+    const post = await newPost();
+    await index(post);
+    expect(await live(post.revisions)).toEqual([false]);
+    await publish(post);
+    expect(await live(post.revisions)).toEqual([true]);
+    await db.post.update({
+      where: { id: post.postId },
+      data: { status: 'UNPUBLISHED', publishedRevisionId: null },
+    });
+    expect(await live(post.revisions)).toEqual([false]);
+  });
+
+  it('moves to the new revision on a republish, and leaves the draft dark until then', async () => {
+    const post = await newPost();
+    await publish(post);
+    const second = await db.revision.create({
+      data: {
+        postId: post.postId,
+        number: 2,
+        parentRevisionId: post.revisions[0]!,
+        authorId: post.authorId,
+        title: 'Title 2',
+        excerpt: '',
+        body: 'Body 2',
+      },
+    });
+    await db.post.update({
+      where: { id: post.postId },
+      data: { headRevisionId: second.id, status: 'DRAFT' },
+    });
+    const both = [post.revisions[0]!, second.id];
+    await index({ revisions: both });
+    expect(await live(both)).toEqual([true, false]);
+    await db.post.update({
+      where: { id: post.postId },
+      data: { status: 'PUBLISHED', publishedRevisionId: second.id },
+    });
+    expect(await live(both)).toEqual([false, true]);
+  });
+
+  it('is live from the start when written for a revision already published', async () => {
+    // The reindex job writes documents for posts that went live before it ran.
+    const post = await newPost();
+    await publish(post);
+    await index(post);
+    expect(await live(post.revisions)).toEqual([true]);
+  });
+
+  it('cannot be forged: setting a draft live by hand is undone by the database', async () => {
+    const post = await newPost();
+    await index(post);
+    await db.searchDocument.update({
+      where: { revisionId: post.revisions[0]! },
+      data: { live: true },
+    });
+    expect(await live(post.revisions)).toEqual([false]);
   });
 });

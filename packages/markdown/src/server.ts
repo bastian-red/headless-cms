@@ -24,7 +24,17 @@ import { Worker } from 'node:worker_threads';
 export const RENDER_BUDGET_MS = 2000;
 
 export type RenderCheck =
-  | { readonly ok: true; readonly ms: number; readonly words: number }
+  | {
+      readonly ok: true;
+      readonly ms: number;
+      readonly words: number;
+      /**
+       * The text a reader sees (`render().text`), computed by the render that
+       * just passed. The search index stores this, so indexing never runs
+       * the parser outside the deadline.
+       */
+      readonly text: string;
+    }
   | {
       readonly ok: false;
       readonly reason: 'timeout' | 'crash' | 'unsafe';

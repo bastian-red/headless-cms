@@ -5,6 +5,7 @@
  * canary words written into everything unpublished) are read from its
  * catalog file rather than retyped here, so the two cannot drift apart.
  */
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -13,13 +14,25 @@ import {
   v1MovedSchema,
   v1PostListSchema,
   v1PostSchema,
+  v1SearchResultSchema,
   v1TagListSchema,
   type V1PostSummary,
 } from '@cms/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DOCUMENTED_ROUTES } from '../src/content/openapi';
-import { boot, call, newApiKey, newUser, routes, type Harness, type Reply } from './support';
+import {
+  boot,
+  call,
+  newApiKey,
+  newPost,
+  newUser,
+  routes,
+  transition,
+  type Harness,
+  type PostReply,
+  type Reply,
+} from './support';
 
 const catalog = readFileSync(
   join(__dirname, '../../../packages/db/prisma/content/catalog.ts'),
@@ -202,6 +215,13 @@ describe('nothing unpublished leaves the API', () => {
     const bodies = replies.map((r) => r.text);
     for (const post of items) bodies.push((await get(`/v1/posts/${post.slug}`)).text);
     bodies.push((await get('/v1/tags')).text);
+    for (const q of [DRAFT_CANARY, COMMENT_CANARY, 'two years in', 'caching']) {
+      const r = await get(`/v1/search?q=${encodeURIComponent(q)}`);
+      const result = v1SearchResultSchema.parse(r.body);
+      if (q === DRAFT_CANARY || q === COMMENT_CANARY) expect(result.total).toBe(0);
+      // Only the hits: `query` echoes what the client sent, canary included.
+      bodies.push(JSON.stringify(result.items));
+    }
     bodies.push((await get(`/v1/posts/${TAKEN_DOWN_SLUG}`)).text);
     for (const text of bodies) {
       expect(text).not.toContain(DRAFT_CANARY);
@@ -231,5 +251,83 @@ describe('GET /v1/openapi.json', () => {
       .filter((route) => route.includes(' /v1/') && !route.endsWith('/openapi.json'))
       .map((route) => route.replace(/:(\w+)/gu, '{$1}'));
     expect(served).toEqual([...DOCUMENTED_ROUTES].sort());
+  });
+});
+
+describe('GET /v1/search', () => {
+  it('answers in the contract shape, title hits first, snippets as data', async () => {
+    const r = await get('/v1/search?q=caching&limit=3');
+    expect(r.status).toBe(200);
+    const result = v1SearchResultSchema.parse(r.body);
+    expect(result.query).toBe('caching');
+    expect(result.items).toHaveLength(3);
+    expect(result.total).toBeGreaterThan(3);
+    expect(result.nextCursor).not.toBeNull();
+    // No markup crosses the API: matched runs are flagged, not wrapped.
+    expect(r.text).not.toMatch(/<mark|<b>|\\u0002/u);
+    expect(result.items.some((hit) => hit.snippet.some((p) => p.match))).toBe(true);
+
+    const next = v1SearchResultSchema.parse(
+      (await get(`/v1/search?q=caching&limit=3&cursor=${result.nextCursor!}`)).body,
+    );
+    const seen = new Set(result.items.map((p) => p.slug));
+    expect(next.items.some((p) => seen.has(p.slug))).toBe(false);
+  });
+
+  it('normalizes the query, and refuses an empty, over-long or foreign-cursor one (400)', async () => {
+    const r = v1SearchResultSchema.parse((await get('/v1/search?q=%20%20caching%0A')).body);
+    expect(r.query).toBe('caching');
+    for (const path of ['/v1/search', '/v1/search?q=%20', `/v1/search?q=${'a'.repeat(201)}`]) {
+      const refused = await get(path);
+      expect(refused.status, path).toBe(400);
+    }
+    const { nextCursor } = v1SearchResultSchema.parse(
+      (await get('/v1/search?q=page&limit=1')).body,
+    );
+    expect((await get(`/v1/search?q=caching&cursor=${nextCursor!}`)).status).toBe(400);
+  });
+
+  it('needs a key, and answers 304 to a matching ETag', async () => {
+    expect((await call(h, 'GET', '/v1/search?q=caching', { user: null })).status).toBe(401);
+    const first = await get('/v1/search?q=caching');
+    const again = await get('/v1/search?q=caching', {
+      'if-none-match': first.headers.get('etag')!,
+    });
+    expect(again.status).toBe(304);
+  });
+
+  it('finds what readers can see: not a draft, then the publish, then only the new text', async () => {
+    const author = await newUser(h.db, 'search-author');
+    const editor = await newUser(h.db, 'search-editor', 'EDITOR');
+    const first = `zyxfirst${randomUUID().slice(0, 6)}`;
+    const second = `zyxsecond${randomUUID().slice(0, 6)}`;
+    const total = async (q: string) =>
+      v1SearchResultSchema.parse((await get(`/v1/search?q=${q}`)).body).total;
+
+    const post = await newPost(h, author, { title: `About ${first}`, body: `Body with ${first}.` });
+    expect(await total(first)).toBe(0);
+    const live = await transition(h, editor, post, 'publish');
+    expect(await total(first)).toBe(1);
+
+    const edit = await call<PostReply>(h, 'POST', `/studio/posts/${post.id}/revisions`, {
+      user: author,
+      body: {
+        baseRevisionId: live.body.headRevisionId,
+        title: `About ${second}`,
+        excerpt: 'x',
+        body: 'New body.',
+      },
+    });
+    expect(edit.status).toBe(201);
+    // A pending edit is invisible; the live text still answers.
+    expect(await total(second)).toBe(0);
+    expect(await total(first)).toBe(1);
+
+    await transition(h, editor, edit.body, 'publish');
+    expect(await total(second)).toBe(1);
+    expect(await total(first)).toBe(0);
+    // Every revision the API wrote has its document, written with it.
+    const docs = await h.db.searchDocument.count({ where: { revision: { postId: post.id } } });
+    expect(docs).toBe(2);
   });
 });

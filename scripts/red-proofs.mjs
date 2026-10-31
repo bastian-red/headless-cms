@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Red proofs for the API's guarantees: break each one in the source, run the
+ * Red proofs for the API's and search's guarantees: break each one in the source, run the
  * suite that claims to hold it, and require that suite to FAIL. A check that
  * has never failed is a check whose meaning nobody knows.
  *
@@ -91,6 +91,61 @@ const PROOFS = [
     to: 'const bare = (tag: string) => tag.trim();',
     suite: ['unit'],
   },
+  // --- search (step 5) ---------------------------------------------------
+  {
+    name: 'search without the title tier',
+    file: 'services/search/src/search.ts',
+    from: '(d.title_vector @@ q.query)::int AS title_hit,',
+    to: '0 AS title_hit,',
+    suite: ['integration', 'search'],
+  },
+  {
+    // Either defense alone holds (the live flag, or the published join), so
+    // only removing both may turn the suite red.
+    name: 'search reads every revision, not the published one',
+    file: 'services/search/src/search.ts',
+    from: `JOIN search_documents d ON d.live AND d.vector @@ q.query
+      JOIN posts p ON p.published_revision_id = d.revision_id`,
+    to: `JOIN search_documents d ON d.vector @@ q.query
+      JOIN revisions r ON r.id = d.revision_id
+      JOIN posts p ON p.id = r.post_id`,
+    suite: ['integration', 'search'],
+  },
+  {
+    name: 'search lets a query of only exclusions walk the index',
+    file: 'services/search/src/search.ts',
+    from: "WHERE querytree(q.query) NOT IN ('', 'T')",
+    to: 'WHERE TRUE',
+    suite: ['integration', 'search'],
+  },
+  {
+    name: 'search snippet window trusted without a match in it',
+    file: 'services/search/src/search.ts',
+    from: "WHEN w.headline = '' OR strpos(w.headline, ${MATCH_START}) > 0 THEN w.headline",
+    to: 'WHEN w.headline IS NOT NULL THEN w.headline',
+    suite: ['integration', 'search'],
+  },
+  {
+    name: 'search cursor not bound to its query',
+    file: 'services/search/src/cursor.ts',
+    from: 'if (!result.success || result.data.q !== queryKey(query)) throw invalid();',
+    to: 'if (!result.success) throw invalid();',
+    suite: ['unit', '@cms/search'],
+  },
+  {
+    name: 'search text keeps control characters (forged highlights)',
+    file: 'packages/shared/src/contracts/search.ts',
+    from: ".replace(/[\\u0000-\\u001f\\u007f\\u0080-\\u009f]/gu, ' ')",
+    to: '',
+    suite: ['unit', '@cms/shared'],
+  },
+  {
+    name: 'search ranks on the whole body (the first design, 513 ms)',
+    file: 'services/search/src/search.ts',
+    from: 'ts_rank(d.lead_vector, q.query, 1) AS rank',
+    to: 'ts_rank_cd(d.vector, q.query, 1) AS rank',
+    suite: ['bench'],
+  },
 ];
 
 const filter = process.argv[2];
@@ -101,19 +156,19 @@ if (chosen.length === 0) {
 }
 
 function run(suite) {
-  const [lane, pattern] = suite;
+  const [lane, arg] = suite;
+  const options = { cwd: ROOT, encoding: 'utf8' };
   const result =
     lane === 'unit'
-      ? spawnSync('pnpm', ['--filter', '@cms/api', 'exec', 'vitest', 'run'], {
-          cwd: ROOT,
-          encoding: 'utf8',
-        })
-      : spawnSync('./scripts/integration.sh', [pattern], { cwd: ROOT, encoding: 'utf8' });
+      ? spawnSync('pnpm', ['--filter', arg ?? '@cms/api', 'exec', 'vitest', 'run'], options)
+      : lane === 'bench'
+        ? spawnSync('pnpm', ['search:bench'], options)
+        : spawnSync('./scripts/integration.sh', [arg], options);
   return {
     status: result.status,
     tail: `${result.stdout}${result.stderr}`
       .split('\n')
-      .filter((l) => /×|FAIL|error TS/u.test(l))
+      .filter((l) => /×|FAIL|error TS|search-bench: \d+ searches/u.test(l))
       .slice(0, 3),
   };
 }

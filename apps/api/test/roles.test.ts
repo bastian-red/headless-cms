@@ -50,6 +50,7 @@ const NOT_SIGNED_IN = [
   'POST /auth/sign-in',
   'GET /v1/posts',
   'GET /v1/posts/:slug',
+  'GET /v1/search',
   'GET /v1/tags',
   'GET /v1/openapi.json',
 ];

@@ -130,16 +130,17 @@ model Revision {
   coverMediaId     String?  @map("cover_media_id")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  post         Post          @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade, map: "revisions_post_id_fkey")
-  parent       Revision?     @relation("RevisionParent", fields: [parentRevisionId], references: [id], onDelete: NoAction, map: "revisions_parent_revision_id_fkey")
-  children     Revision[]    @relation("RevisionParent")
-  restoredFrom Revision?     @relation("RevisionRestore", fields: [restoredFromId], references: [id], onDelete: NoAction, map: "revisions_restored_from_id_fkey")
-  restores     Revision[]    @relation("RevisionRestore")
-  author       User          @relation("RevisionAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "revisions_author_id_fkey")
-  cover        Media?        @relation(fields: [coverMediaId], references: [id], onDelete: Restrict, map: "revisions_cover_media_id_fkey")
+  post         Post            @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade, map: "revisions_post_id_fkey")
+  parent       Revision?       @relation("RevisionParent", fields: [parentRevisionId], references: [id], onDelete: NoAction, map: "revisions_parent_revision_id_fkey")
+  children     Revision[]      @relation("RevisionParent")
+  restoredFrom Revision?       @relation("RevisionRestore", fields: [restoredFromId], references: [id], onDelete: NoAction, map: "revisions_restored_from_id_fkey")
+  restores     Revision[]      @relation("RevisionRestore")
+  author       User            @relation("RevisionAuthor", fields: [authorId], references: [id], onDelete: Restrict, map: "revisions_author_id_fkey")
+  cover        Media?          @relation(fields: [coverMediaId], references: [id], onDelete: Restrict, map: "revisions_cover_media_id_fkey")
   tags         RevisionTag[]
-  headOf       Post?         @relation("PostHead")
-  publishedOf  Post?         @relation("PostPublished")
+  headOf       Post?           @relation("PostHead")
+  publishedOf  Post?           @relation("PostPublished")
+  search       SearchDocument?
 
   @@unique([postId, number], map: "revisions_post_id_number_key")
   /// The target of the same-post composite foreign keys (hand-written SQL).
@@ -267,4 +268,34 @@ model RevalidationEvent {
   lastError     String?   @map("last_error")
 
   @@map("revalidation_events")
+}
+
+/// What full-text search reads: one row per revision, derived from it and
+/// written in the same transaction (the API) or by the seed. `body` is the
+/// text a reader sees (`@cms/markdown`'s `render().text`), never the markdown
+/// source, so link URLs, syntax and dropped raw HTML are not searchable and
+/// cannot surface in a snippet. Derived, so it can be rebuilt
+/// (`pnpm search:reindex`).
+///
+/// Hand-written in the migrations, because Prisma can declare none of it:
+/// `live` is computed by triggers from `posts.published_revision_id` (never
+/// written by a client); `lead`, `vector`, `title_vector` and `lead_vector`
+/// are generated columns; the GIN index covers `vector` WHERE `live`.
+model SearchDocument {
+  revisionId  String                   @id @map("revision_id")
+  title       String
+  excerpt     String
+  body        String
+  /// The first 600 characters of `body`, cut back to a word boundary.
+  lead        String?                  @default(dbgenerated())
+  /// True exactly for a post's published revision (trigger-maintained).
+  live        Boolean                  @default(false)
+  vector      Unsupported("tsvector")? @default(dbgenerated())
+  titleVector Unsupported("tsvector")? @default(dbgenerated()) @map("title_vector")
+  leadVector  Unsupported("tsvector")? @default(dbgenerated()) @map("lead_vector")
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  revision Revision @relation(fields: [revisionId], references: [id], onDelete: Cascade, map: "search_documents_revision_id_fkey")
+
+  @@map("search_documents")
 }

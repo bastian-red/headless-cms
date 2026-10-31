@@ -7,3 +7,4 @@ export * from './workflow';
 export * from './studio';
 export * from './content-api';
 export * from './revalidation';
+export * from './search';

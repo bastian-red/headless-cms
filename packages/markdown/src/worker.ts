@@ -19,8 +19,8 @@ if (port === null) throw new Error('worker.ts runs only as a worker thread');
 port.on('message', ({ id, markdown }: { id: number; markdown: string }) => {
   const started = performance.now();
   try {
-    const { words } = render(markdown);
-    port.postMessage({ id, ok: true, ms: performance.now() - started, words });
+    const { words, text } = render(markdown);
+    port.postMessage({ id, ok: true, ms: performance.now() - started, words, text });
   } catch (error) {
     port.postMessage({
       id,

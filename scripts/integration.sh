@@ -57,6 +57,9 @@ pnpm --filter @cms/db exec vitest run --config vitest.integration.config.ts
 echo "integration: seed"
 pnpm --filter @cms/db exec tsx prisma/seed.mts >/dev/null
 
+echo "integration: search"
+pnpm --filter @cms/search exec vitest run --config vitest.integration.config.ts
+
 echo "integration: API"
 if [[ $# -gt 0 ]]; then
   pnpm --filter @cms/api exec vitest run --config vitest.integration.config.ts "$@"

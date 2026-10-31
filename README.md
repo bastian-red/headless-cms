@@ -8,12 +8,12 @@ revalidated by tag the moment a publish lands, with no rebuild. A versioned cont
 same published content to any other frontend, and the public site reads through it like any other
 client. Nothing unpublished may ever reach a page, a feed, a sitemap or a search result.
 
-> **Status: build step 4 of 11, the API.** Sign-in, the three roles, the publisher process, health
+> **Status: build step 5 of 11, search.** Sign-in, the three roles, the publisher process, health
 > and status, every test lane and CI are in place, and so are the content schema, a seeded demo
-> publication of forty posts, the one sanitizing markdown renderer, and the API: posts and
-> revisions with stale-save conflicts, the editorial workflow, content API v1 and API keys. Search,
-> the rendering matrix, SEO, comments, the studio editor and the visual identity arrive in the
-> following steps. This README is rewritten as each one lands (demo GIF included at the end);
+> publication of forty posts, the one sanitizing markdown renderer, the API (posts and revisions
+> with stale-save conflicts, the editorial workflow, content API v1 and API keys) and full-text
+> search over published posts, benchmarked at p95 33 ms over 2,000 of them. The rendering matrix,
+> SEO, comments, the studio editor and the visual identity arrive in the following steps. This README is rewritten as each one lands (demo GIF included at the end);
 > nothing below describes a feature that is not in the code.
 
 ```mermaid
@@ -22,11 +22,11 @@ flowchart LR
   writer([Author / Editor / Admin]) --> web
 
   subgraph app ["App"]
-    web["apps/web<br/>Next.js 16<br/>public site + studio"] -->|"service token<br/>(HS256, 120 s)"| api["apps/api<br/>NestJS"]
+    web["apps/web<br/>Next.js 16<br/>public site + studio"] -->|"service token<br/>(HS256, 120 s)"| api["apps/api<br/>NestJS<br/>+ services/search (library)"]
   end
   publisher["services/publisher<br/>Node"]
 
-  api --> pg[(Postgres 16)]
+  api -->|"content, full-text search"| pg[(Postgres 16)]
   api -->|"throttler counters"| redis[(Redis 7)]
   api -->|"GET /health<br/>for /status"| publisher
   publisher --> pg
@@ -139,17 +139,17 @@ revision the client says it started from.
 
 ### Studio API (`/studio`, signed in)
 
-| Route | Needs | What it does |
-|---|---|---|
-| `GET/POST /studio/posts` | `post.read` / `post.write` | List (an author sees only their own), create with revision 1 |
-| `GET /studio/posts/:id`, `.../revisions`, `.../revisions/:rid` | `post.read` | The post with its head, the history, one revision |
-| `POST /studio/posts/:id/revisions` | `post.write` | Save: `baseRevisionId` + fields. 201 new head, 200 nothing changed, 409 stale, 422 does not render |
-| `POST /studio/posts/:id/revisions/:rid/restore` | `post.restore` | Restore = a new revision with the old content; history is never rewritten |
-| `PUT /studio/posts/:id/slug` | `post.write` | Rename; renaming a post that was ever public is an editor's call and leaves a 308 behind |
-| `POST /studio/posts/:id/transitions` | per action | `submit`, `withdraw`, `publish`, `schedule`, `unschedule`, `unpublish`, pinned to the head the caller saw |
-| `GET/POST /studio/tags` | `post.read` / `tag.manage` | |
-| `GET/POST /studio/users`, `PATCH .../:id/role` | `user.manage` | The last admin cannot be demoted |
-| `GET/POST/DELETE /studio/api-keys` | `apikey.manage` | A key is shown once and stored as a SHA-256 |
+| Route                                                          | Needs                      | What it does                                                                                              |
+| -------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `GET/POST /studio/posts`                                       | `post.read` / `post.write` | List (an author sees only their own), create with revision 1                                              |
+| `GET /studio/posts/:id`, `.../revisions`, `.../revisions/:rid` | `post.read`                | The post with its head, the history, one revision                                                         |
+| `POST /studio/posts/:id/revisions`                             | `post.write`               | Save: `baseRevisionId` + fields. 201 new head, 200 nothing changed, 409 stale, 422 does not render        |
+| `POST /studio/posts/:id/revisions/:rid/restore`                | `post.restore`             | Restore = a new revision with the old content; history is never rewritten                                 |
+| `PUT /studio/posts/:id/slug`                                   | `post.write`               | Rename; renaming a post that was ever public is an editor's call and leaves a 308 behind                  |
+| `POST /studio/posts/:id/transitions`                           | per action                 | `submit`, `withdraw`, `publish`, `schedule`, `unschedule`, `unpublish`, pinned to the head the caller saw |
+| `GET/POST /studio/tags`                                        | `post.read` / `tag.manage` |                                                                                                           |
+| `GET/POST /studio/users`, `PATCH .../:id/role`                 | `user.manage`              | The last admin cannot be demoted                                                                          |
+| `GET/POST/DELETE /studio/api-keys`                             | `apikey.manage`            | A key is shown once and stored as a SHA-256                                                               |
 
 - **A stale save is a 409 that says what happened.** Five editors saving from the same base:
   one wins and four get `409` with the winning revision, the fields that differ and a unified diff
@@ -176,12 +176,13 @@ revision the client says it started from.
 `Authorization: Bearer hcms_...`, issued by an admin in the studio. Missing, malformed, unknown,
 revoked and studio-token credentials all get the same 401.
 
-| Route | Answer |
-|---|---|
-| `GET /v1/posts?tag=&author=&limit=&cursor=` | Live posts, newest first, keyset-paginated (`nextCursor`) |
-| `GET /v1/posts/:slug` | The published revision as markdown and as sanitized HTML, with outline, words and reading time; `308` + `Location` from an old slug; `410` if taken down; `404` if it never went out |
-| `GET /v1/tags` | Tags on at least one live post, with counts |
-| `GET /v1/openapi.json` | The OpenAPI 3 document, public, generated from the same zod schemas the tests parse responses with |
+| Route                                       | Answer                                                                                                                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /v1/posts?tag=&author=&limit=&cursor=` | Live posts, newest first, keyset-paginated (`nextCursor`)                                                                                                                            |
+| `GET /v1/posts/:slug`                       | The published revision as markdown and as sanitized HTML, with outline, words and reading time; `308` + `Location` from an old slug; `410` if taken down; `404` if it never went out |
+| `GET /v1/tags`                              | Tags on at least one live post, with counts                                                                                                                                          |
+| `GET /v1/search?q=&limit=&cursor=`          | Live posts matching `q`, title hits first, with `total` and a snippet as data; see [Search](#search)                                                                                 |
+| `GET /v1/openapi.json`                      | The OpenAPI 3 document, public, generated from the same zod schemas the tests parse responses with                                                                                   |
 
 - **Drafts have no road out.** Every query reads `published_revision_id`; nothing in the content
   service selects the head. The integration suite crawls every page, post and tag for the seed's
@@ -192,6 +193,45 @@ revoked and studio-token credentials all get the same 401.
 - **A draft and nothing at all answer byte for byte the same 404**, so the API does not disclose
   what is being written.
 
+## Search
+
+`GET /v1/search?q=edge+caching` answers from Postgres full-text search, in the database the content
+already lives in ([`services/search`](services/search/README.md) has the whole design and its
+measurements):
+
+```json
+{
+  "query": "edge caching",
+  "total": 2,
+  "nextCursor": null,
+  "items": [
+    {
+      "slug": "caching-at-the-edge-a-year-in",
+      "title": "Caching at the edge, a year in",
+      "...": "...",
+      "snippet": [
+        { "text": "A year ago we put a ", "match": false },
+        { "text": "cache", "match": true },
+        { "text": " in front of every public", "match": false }
+      ]
+    }
+  ]
+}
+```
+
+- **Only published text can match**, held three ways: the database keeps each revision's
+  document `live` exactly while it is the published one (triggers, a forged flag is undone), the
+  query also joins the published pointer, and the API keeps a hit only if it still is.
+- **What is indexed is what readers read:** the renderer's text, never the markdown source, so the
+  hostile post's `<script>` payload is not findable.
+- **A title match always outranks a body-only match.** It is the first sort key, not a weight,
+  because weights alone invert (the suite builds the case).
+- **The query syntax readers already type:** `"a phrase"`, `or`, `-without`, never a syntax
+  error. Snippets are `[{ text, match }]`, so no client has to trust HTML from a search result.
+- **p95 33 ms over 2,000 published posts** (`pnpm search:bench`, a CI step, budget 50 ms), with
+  the common words matching every post. The first design measured 513 ms; the README in
+  `services/search` says what each step bought.
+
 ## Running it
 
 Requires Node 20+, pnpm 9 and Docker.
@@ -201,18 +241,18 @@ pnpm install
 cp .env.example .env
 sed -i "s|^AUTH_SECRET=|AUTH_SECRET=$(openssl rand -base64 32)|" .env
 docker compose -f infra/docker-compose.yml up -d     # Postgres :5444, Redis :6390
-pnpm db:deploy && pnpm db:seed
+pnpm db:deploy && pnpm db:seed                        # the seed writes search documents too
 pnpm dev                                              # web :3000, api :4000, publisher :4400
 ```
 
 Open <http://localhost:3000/studio> and sign in with a seeded account (local accounts for a local
 database, published on purpose):
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | `ines@quire.test` | `admin-password-2026` |
+| Role   | Email              | Password               |
+| ------ | ------------------ | ---------------------- |
+| Admin  | `ines@quire.test`  | `admin-password-2026`  |
 | Editor | `tomas@quire.test` | `editor-password-2026` |
-| Author | `mara@quire.test` | `author-password-2026` |
+| Author | `mara@quire.test`  | `author-password-2026` |
 
 The whole stack in containers: `docker compose -f infra/docker-compose.yml --profile app up -d --build`.
 
@@ -222,15 +262,16 @@ so without the wrapper the API would boot with no secret.
 
 ## Testing
 
-| Lane | Command | What it proves |
-|---|---|---|
-| Gate (every commit) | `pnpm test` | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML` |
-| Environment contract | `pnpm env:contract` | Source, `.env.example` and `turbo.json` agree in all four directions |
-| Seed check | `./scripts/seed-check.sh` | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row, every internal link in a live post resolves |
-| Integration | `./scripts/integration.sh` | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race), then the seeded newsroom behind the real Nest graph on Postgres and Redis at the documented budgets: sign-in and the default-closed guard; every studio route against every role (403 exactly where the role table says no, before the body is read); the five-way stale-save race; the render deadline; every workflow transition and its outbox row; the content API's pagination, filters, ETags, 308/410/404 and a canary crawl of every response; the OpenAPI document matching the router; the last-admin race; API key revocation |
-| Red proofs | `node scripts/red-proofs.mjs` | Breaks each API guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags), runs the suite that claims it, and fails unless that suite goes red |
-| E2E | `./scripts/e2e.sh` | Production build, the rendering matrix, Chromium and Firefox: sign-in per role, deep links, open-redirect refusal, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px |
-| Dev smoke | `./scripts/dev-smoke.sh` | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves a studio that read the editor from Postgres |
+| Lane                 | Command                       | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate (every commit)  | `pnpm test`                   | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML`                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Environment contract | `pnpm env:contract`           | Source, `.env.example` and `turbo.json` agree in all four directions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Seed check           | `./scripts/seed-check.sh`     | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row or a live search document, one live search document per live post, every internal link in a live post resolves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Integration          | `./scripts/integration.sh`    | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race) and the search documents' `live` flag following every publish, then the search query on the seeded corpus (title tier, no draft or canary findable, query syntax, every snippet path, cursor crawl), then the seeded newsroom behind the real Nest graph on Postgres and Redis at the documented budgets: sign-in and the default-closed guard; every studio route against every role (403 exactly where the role table says no, before the body is read); the five-way stale-save race; the render deadline; every workflow transition and its outbox row; the content API's pagination, filters, ETags, 308/410/404 and a canary crawl of every response; the OpenAPI document matching the router; the last-admin race; API key revocation |
+| Search bench         | `pnpm search:bench`           | p95 < 50 ms over 2,000 published posts and 4,500 documents, 25 query shapes, through the exact function `/v1/search` calls; the GIN index used by a selective query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Red proofs           | `node scripts/red-proofs.mjs` | Breaks each guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags; for search the title tier, both draft defenses, the exclusion rule, the snippet window's check, the cursor binding, control-character stripping, and the first design's ranking against the bench), runs the suite that claims it, and fails unless that suite goes red                                                                                                                                                                                                                                                                                                                                                                               |
+| E2E                  | `./scripts/e2e.sh`            | Production build, the rendering matrix, Chromium and Firefox: sign-in per role, deep links, open-redirect refusal, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Dev smoke            | `./scripts/dev-smoke.sh`      | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves a studio that read the editor from Postgres                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 The pre-commit hook runs gitleaks, the environment contract, the invisible-character scan, prettier
 and the gate lane. CI runs every lane above plus lint, typecheck, a dependency audit and the three
@@ -246,7 +287,8 @@ document.
 
 ```
 apps/web            Next.js 16: the public site and the studio
-apps/api            NestJS: auth, studio API (posts, revisions, workflow, tags, users, keys), content API v1, health, status
+apps/api            NestJS: auth, studio API (posts, revisions, workflow, tags, users, keys), content API v1 and search, health, status
+services/search     Postgres full-text search: the query, ranking, snippets, cursors, reindex
 services/publisher  publish delivery and scheduling (health only until step 7)
 packages/markdown   the one renderer: parse, sanitize, audit; React, HTML and text out
 packages/db         Prisma schema, migrations, the seeded publication, schema tests

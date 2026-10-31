@@ -22,6 +22,8 @@ import {
   v1PostListSchema,
   v1PostQuerySchema,
   v1PostSchema,
+  v1SearchQuerySchema,
+  v1SearchResultSchema,
   v1TagListSchema,
   z,
 } from '@cms/shared';
@@ -29,7 +31,12 @@ import {
 extendZodWithOpenApi(z);
 
 /** Every route the document describes, as `METHOD /path`; the integration suite compares it with the router. */
-export const DOCUMENTED_ROUTES = ['GET /v1/posts', 'GET /v1/posts/{slug}', 'GET /v1/tags'] as const;
+export const DOCUMENTED_ROUTES = [
+  'GET /v1/posts',
+  'GET /v1/posts/{slug}',
+  'GET /v1/search',
+  'GET /v1/tags',
+] as const;
 
 let cached: ReturnType<OpenApiGeneratorV3['generateDocument']> | null = null;
 
@@ -55,6 +62,7 @@ export function openApiDocument() {
   const PostSummaryList = registry.register('PostList', v1PostListSchema);
   const Post = registry.register('Post', v1PostSchema);
   const TagList = registry.register('TagList', v1TagListSchema);
+  const SearchResult = registry.register('SearchResult', v1SearchResultSchema);
 
   registry.registerPath({
     method: 'get',
@@ -79,6 +87,21 @@ export function openApiDocument() {
       308: json(v1MovedSchema, 'An old slug: `Location` and `slug` name the current one.'),
       404: json(v1ErrorSchema, 'No live post has ever had this address.'),
       410: json(v1ErrorSchema, 'The post was public and has been taken down.'),
+      ...errors,
+    },
+  });
+  registry.registerPath({
+    method: 'get',
+    path: '/v1/search',
+    summary: 'Live posts matching a query, best first',
+    description:
+      'Web-search syntax: `"exact phrase"`, `or`, `-without`. A title match always ranks above a ' +
+      'body-only match. `snippet` is runs of text with the matched runs flagged; it carries no HTML.',
+    security,
+    request: { query: v1SearchQuerySchema },
+    responses: {
+      200: json(SearchResult, 'A page of hits; `total` counts every match.'),
+      400: json(v1ErrorSchema, 'An empty or over-long query, or a cursor from another query.'),
       ...errors,
     },
   });

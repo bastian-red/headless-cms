@@ -11,7 +11,7 @@ import { RenderChecker, checkRenderable } from '@cms/markdown/server';
 const { tree, outline, text, words, readingMinutes } = render(body);
 toReact(tree, { a: Link }); // page and preview: React elements
 renderHtml(render(body, { base: postUrl }).tree); // feed: HTML with absolute URLs
-await checkRenderable(body); // one-off: { ok } or { ok: false, reason }
+await checkRenderable(body); // one-off: { ok, ms, words, text } or { ok: false, reason }
 
 const checker = new RenderChecker(); // a server: one long-lived worker
 await checker.check(body, { timeoutMs: 2000 });
@@ -29,6 +29,10 @@ worker picks it up, not when it was queued, so a slow body ahead of it cannot sp
 check that overruns or crashes the worker settles as refused, the worker is detached before it is
 terminated, and the next check gets a fresh one. Reusing the worker is what makes a save cheap:
 five checks on one worker finish in under 250 ms, and the test holds that number.
+
+A passing check carries the body's reader-visible `text` (the same string `render(body).text`
+gives, which `server.test.ts` holds), so the API writes the search document from the render it
+already paid for instead of rendering the body a second time.
 
 ESM only, because the unified ecosystem is. The CommonJS API loads it with
 `await import('@cms/markdown')`.

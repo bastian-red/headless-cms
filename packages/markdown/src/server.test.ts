@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { LIMITS } from '@cms/shared';
 import { describe, expect, it } from 'vitest';
 
+import { render } from './render.js';
 import type * as Server from './server.js';
 
 const built = new URL('../dist/server.js', import.meta.url);
@@ -23,7 +24,25 @@ const longRead = readFileSync(
   'utf8',
 );
 
+const hostile = readFileSync(
+  new URL('../../db/prisma/content/posts/we-never-render-raw-html.md', import.meta.url),
+  'utf8',
+);
+
 describe('checkRenderable', () => {
+  it('hands back exactly the text the in-process render gives, for the search index', async () => {
+    for (const body of [longRead, hostile]) {
+      const result = await checkRenderable(body);
+      expect(result.ok && result.text).toBe(render(body).text);
+    }
+    // Raw HTML and link addresses are dropped before text is taken, so the
+    // payloads are never indexed; a code sample is text and is.
+    const { text } = (await checkRenderable(hostile)) as { text: string };
+    expect(text).not.toContain('__quireHostile');
+    expect(text).toContain('A link that tries to run code');
+    expect(text).toContain("alert('this is a code sample');");
+  });
+
   it('passes the seeded long read well inside the budget', async () => {
     const result = await checkRenderable(longRead);
     expect(result).toMatchObject({ ok: true });

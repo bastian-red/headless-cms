@@ -51,6 +51,9 @@ export const POST_PUBLISHED_SAME_POST = 'posts_published_revision_same_post_fkey
 export const REVISION_PARENT_SAME_POST = 'revisions_parent_same_post_fkey';
 export const REVISION_RESTORED_SAME_POST = 'revisions_restored_from_same_post_fkey';
 
+/** The full-text index: GIN over `search_documents.vector`, partial on `live` (hand-written). */
+export const SEARCH_VECTOR_INDEX = 'search_documents_live_vector_idx';
+
 /**
  * Hand-written objects that `prisma migrate diff` sees and would DROP, because
  * schema.prisma cannot declare them. `scripts/db-drift.mjs` reads this list
@@ -62,4 +65,5 @@ export const HAND_WRITTEN_DIFF_OBJECTS: readonly string[] = Object.freeze([
   POST_PUBLISHED_SAME_POST,
   REVISION_PARENT_SAME_POST,
   REVISION_RESTORED_SAME_POST,
+  SEARCH_VECTOR_INDEX,
 ]);

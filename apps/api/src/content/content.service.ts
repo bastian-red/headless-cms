@@ -5,7 +5,15 @@
  * for the seed's draft canary and fails if one does.
  */
 import { Injectable } from '@nestjs/common';
-import { DomainError, type V1Post, type V1PostQuery, type V1PostSummary } from '@cms/shared';
+import { searchPublished } from '@cms/search';
+import {
+  DomainError,
+  type V1Post,
+  type V1PostQuery,
+  type V1PostSummary,
+  type V1SearchQuery,
+  type V1SearchResult,
+} from '@cms/shared';
 
 import { decodeCursor, page } from '../common/cursor';
 import { MarkdownService } from '../infra/markdown.service';
@@ -139,6 +147,31 @@ export class ContentService {
     if (redirect.post.publishedRevisionId !== null)
       return { kind: 'moved', slug: redirect.post.slug };
     throw redirect.post.publishedAt === null ? notFound() : gone();
+  }
+
+  /**
+   * Full-text search (`@cms/search`), each hit with the same summary fields
+   * as `/v1/posts`. A hit is kept only while the post's published revision is
+   * still the one that matched: a publish landing between the search and
+   * this read would otherwise pair one revision's snippet with another's
+   * title, so that hit is left out of the page instead.
+   */
+  async search(query: V1SearchQuery): Promise<V1SearchResult> {
+    const found = await searchPublished(this.prisma.client, {
+      query: query.q,
+      limit: query.limit,
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+    });
+    const rows = await this.prisma.client.post.findMany({
+      where: { id: { in: found.hits.map((h) => h.postId) } },
+      select: summarySelect,
+    });
+    const byRevision = new Map(rows.map((r) => [r.published?.id, r]));
+    const items = found.hits.flatMap((hit) => {
+      const row = byRevision.get(hit.revisionId);
+      return row === undefined ? [] : [{ ...summary(row), snippet: hit.snippet }];
+    });
+    return { query: found.query, total: found.total, items, nextCursor: found.nextCursor };
   }
 
   /** Tags carried by at least one live post's published revision. */

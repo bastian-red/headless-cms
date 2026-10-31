@@ -17,9 +17,10 @@
  *    the only way the database lets a revision be deleted). A post written in
  *    the studio is never touched.
  * 3. **Written the way the API will write it.** A post is inserted without a
- *    head, its revisions follow in order, then the pointers and the status
- *    are set. Every CHECK, same-post key and trigger in the migrations runs on
- *    this data, so a seed that violates the content model cannot load.
+ *    head, its revisions follow in order (each with its search document,
+ *    from the same `searchDocument` the API uses), then the pointers and the
+ *    status are set. Every CHECK, same-post key and trigger in the migrations
+ *    runs on this data, so a seed that violates the content model cannot load.
  * 4. **Nothing unpublished is public.** Text in drafts, pending revisions,
  *    scheduled and unpublished posts and unmoderated comments carries a canary
  *    word (catalog.ts). The seed check fails if any public row contains it.
@@ -38,6 +39,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { render } from '@cms/markdown';
+import { searchDocument } from '@cms/shared';
 import { hashPassword } from '@cms/shared/server';
 
 import { createPrismaClient, type PrismaClient } from '../src/client.ts';
@@ -208,6 +211,14 @@ async function seedContent(prisma: PrismaClient, people: Record<Person, string>)
               seoDescription: revision.seoDescription,
               createdAt: revision.createdAt,
               tags: { create: revision.tags.map((slug) => ({ tagId: tagId(slug) })) },
+            },
+          });
+          // As the API does on every save: the reader-visible text, indexed.
+          // In-process here: these bodies are the renderer's own test corpus.
+          await tx.searchDocument.create({
+            data: {
+              ...searchDocument(ids[i]!, { ...revision, text: render(revision.body).text }),
+              createdAt: revision.createdAt,
             },
           });
         }

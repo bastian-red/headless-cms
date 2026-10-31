@@ -56,6 +56,8 @@ WITH x AS (
   UNION ALL SELECT 'redirect ' || from_slug || ' ' || post_id || ' ' || created_at::text FROM slug_redirects
   UNION ALL SELECT 'comment ' || id || ' ' || post_id || ' ' || name || ' ' || md5(body) || ' ' || status || ' ' ||
                    ip_hash || ' ' || created_at::text || ' ' || coalesce(moderated_at::text, '-') FROM comments
+  UNION ALL SELECT 'search ' || revision_id || ' ' || live::text || ' ' ||
+                   md5(title || '|' || excerpt || '|' || body) || ' ' || created_at::text FROM search_documents
 )
 SELECT count(*)::int AS n, md5(string_agg(x, '|' ORDER BY x)) AS digest FROM x`;
 
@@ -156,6 +158,38 @@ try {
   if (privateComments < 3)
     fail(`only ${privateComments} unapproved comment(s) carry the comment canary.`);
 
+  // --- Search reads exactly what readers can read --------------------------
+  const unindexed = await count(
+    'SELECT count(*) FROM revisions r LEFT JOIN search_documents d ON d.revision_id = r.id WHERE d.revision_id IS NULL',
+  );
+  if (unindexed > 0) fail(`${unindexed} revision(s) have no search document.`);
+  const wrongFlag = await count(`
+    SELECT count(*) FROM search_documents d
+    WHERE d.live <> EXISTS (SELECT 1 FROM posts p WHERE p.published_revision_id = d.revision_id)`);
+  if (wrongFlag > 0) fail(`${wrongFlag} search document(s) disagree with posts about being live.`);
+  const liveDocuments = await count('SELECT count(*) FROM search_documents WHERE live');
+  const livePosts = await count(
+    'SELECT count(*) FROM posts WHERE published_revision_id IS NOT NULL',
+  );
+  if (liveDocuments !== livePosts) {
+    fail(`${liveDocuments} live search document(s) for ${livePosts} live post(s).`);
+  }
+  let darkCanaries = 0;
+  for (const canary of [DRAFT_CANARY, COMMENT_CANARY]) {
+    const leaks = await count(
+      "SELECT count(*) FROM search_documents WHERE live AND concat_ws(' ', title, excerpt, body) ILIKE '%' || $1 || '%'",
+      canary,
+    );
+    if (leaks > 0) fail(`the canary "${canary}" is in ${leaks} live search document(s).`);
+    darkCanaries += await count(
+      "SELECT count(*) FROM search_documents WHERE NOT live AND concat_ws(' ', title, excerpt, body) ILIKE '%' || $1 || '%'",
+      canary,
+    );
+  }
+  // The draft canary is indexed (drafts have documents) and kept dark.
+  if (darkCanaries === 0)
+    fail('no dark search document carries a canary; the leak check read nothing.');
+
   // --- Every internal link on a public page goes somewhere public ----------
   const live = await db.$queryRawUnsafe(`
     SELECT p.slug, r.body FROM posts p JOIN revisions r ON r.id = p.published_revision_id`);
@@ -199,7 +233,9 @@ try {
   console.log(
     `PASS: two runs, identical digests over ${first.n} rows; every workflow state present; ` +
       `no canary in a public row (${privateRevisions} private revisions and ${privateComments} ` +
-      `comments carry one); ${links} internal links all public; long-form post ${words} words.`,
+      `comments carry one); ${liveDocuments} live search documents, one per live post, ` +
+      `${darkCanaries} dark ones carry a canary; ${links} internal links all public; ` +
+      `long-form post ${words} words.`,
   );
 } finally {
   await db.$disconnect();

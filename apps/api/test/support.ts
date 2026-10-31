@@ -69,6 +69,10 @@ export async function boot(): Promise<Harness> {
     db,
     redis,
     close: async () => {
+      // The posts this suite made go with it (their revisions, documents and
+      // redirects cascade), so live fixtures do not pile up across runs and
+      // grow every crawl of the content API past its per-key budget.
+      await db.post.deleteMany({ where: { id: { in: created.splice(0) } } });
       await db.$disconnect();
       redis.disconnect();
       await app.close();
@@ -188,6 +192,9 @@ export interface PostReply {
   head: { id: string; number: number; title: string; body: string; tags: { slug: string }[] };
 }
 
+/** Every post `newPost` made in this process, deleted by `close()`. */
+const created: string[] = [];
+
 /** A post with a unique slug, created through the studio API. */
 export async function newPost(
   harness: Harness,
@@ -205,6 +212,7 @@ export async function newPost(
     },
   });
   if (r.status !== 201) throw new Error(`could not create a post: ${r.status} ${r.text}`);
+  created.push(r.body.id);
   return r.body;
 }
 

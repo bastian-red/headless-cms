@@ -4,7 +4,14 @@
  * among any others.
  */
 import { Controller, Get, HttpStatus, Param, Query, Res, UseInterceptors } from '@nestjs/common';
-import { slugSchema, v1PostQuerySchema, type V1Post, type V1PostQuery } from '@cms/shared';
+import {
+  slugSchema,
+  v1PostQuerySchema,
+  v1SearchQuerySchema,
+  type V1Post,
+  type V1PostQuery,
+  type V1SearchQuery,
+} from '@cms/shared';
 import type { Response } from 'express';
 
 import { ContentApi } from '../common/api-key.guard';
@@ -42,6 +49,13 @@ export class ContentController {
   @Get('tags')
   async tags() {
     return { items: await this.content.tags() };
+  }
+
+  /** Live posts matching `q`, best first, each with a snippet as data (no HTML). */
+  @ContentApi()
+  @Get('search')
+  search(@Query(new ZodPipe(v1SearchQuerySchema)) query: V1SearchQuery) {
+    return this.content.search(query);
   }
 
   /** The API's own description. Public: it describes the shapes, it holds no content. */
