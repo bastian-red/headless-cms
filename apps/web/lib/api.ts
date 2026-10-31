@@ -73,7 +73,7 @@ async function call<T>(
   baseUrl: string,
   user: SessionUser | null,
   path: string,
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  schema: z.ZodType<T, unknown>,
   options: RequestOptions,
 ): Promise<T> {
   const address = user === null ? await clientAddress() : null;
@@ -135,7 +135,7 @@ async function call<T>(
 export function apiFetch<T>(
   user: SessionUser | null,
   path: string,
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  schema: z.ZodType<T, unknown>,
   options: RequestOptions = {},
 ): Promise<T> {
   return call(apiBaseUrl, user, path, schema, options);

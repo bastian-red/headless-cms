@@ -1,0 +1,26 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index b02ff5702c8c0ec9cc072f0fc7d930745694cfcd..8241b2b12bdb6477184c8b7d11d0e0f2ba4556ee 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -890,7 +890,7 @@ class StringTransformer {
+         var _a, _b, _c, _d;
+         const regexCheck = (_a = zodSchema.def.checks) === null || _a === void 0 ? void 0 : _a.find(isZodCheckRegex);
+         // toString generates an additional / at the beginning and end of the pattern
+-        const pattern = regexCheck === null || regexCheck === void 0 ? void 0 : regexCheck._zod.def.pattern.toString().replace(/^\/|\/$/g, '');
++        const pattern = regexCheck === null || regexCheck === void 0 ? void 0 : regexCheck._zod.def.pattern.source;
+         const check = (_b = zodSchema.def.checks) === null || _b === void 0 ? void 0 : _b.find(isZodCheckLengthEquals);
+         const length = check === null || check === void 0 ? void 0 : check._zod.def.length;
+         const maxLength = Number.isFinite(zodSchema.minLength)
+diff --git a/dist/index.mjs b/dist/index.mjs
+index e1ce9d0229cf3bd6a18fdaf49bc268422c7f73f4..31b256c654a4c617c35144782edee18b5dafe6b0 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -888,7 +888,7 @@ class StringTransformer {
+         var _a, _b, _c, _d;
+         const regexCheck = (_a = zodSchema.def.checks) === null || _a === void 0 ? void 0 : _a.find(isZodCheckRegex);
+         // toString generates an additional / at the beginning and end of the pattern
+-        const pattern = regexCheck === null || regexCheck === void 0 ? void 0 : regexCheck._zod.def.pattern.toString().replace(/^\/|\/$/g, '');
++        const pattern = regexCheck === null || regexCheck === void 0 ? void 0 : regexCheck._zod.def.pattern.source;
+         const check = (_b = zodSchema.def.checks) === null || _b === void 0 ? void 0 : _b.find(isZodCheckLengthEquals);
+         const length = check === null || check === void 0 ? void 0 : check._zod.def.length;
+         const maxLength = Number.isFinite(zodSchema.minLength)

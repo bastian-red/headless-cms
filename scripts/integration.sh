@@ -49,13 +49,33 @@ pnpm --filter @cms/api exec node -e "
 pnpm --filter @cms/db exec prisma migrate deploy >/dev/null
 node scripts/db-drift.mjs
 
+
+# The suites delete every post they make. A post left behind is a failure:
+# leftovers are live fixtures that pile up run after run, until every crawl of
+# the content API outgrows its per-key budget and the lane 429s for a reason
+# no test names. Counted around each phase, so the message names the phase.
+count_posts() {
+  pnpm --silent --filter @cms/db exec node -e "
+    const { PrismaClient } = require('./generated/client');
+    const db = new PrismaClient();
+    db.post.count().then((n) => console.log(n)).finally(() => db.\$disconnect());
+  "
+}
+leftovers() { # phase before after
+  [[ "$2" == "$3" ]] ||
+    { echo "integration: the $1 suites left $(($3 - $2)) post(s) in ${DATABASE_URL%%\?*}." >&2; exit 1; }
+}
+
 echo "integration: database guarantees"
+before=$(count_posts)
 pnpm --filter @cms/db exec vitest run --config vitest.integration.config.ts
+leftovers database "$before" "$(count_posts)"
 
 # The API suites read the demo newsroom (redirects, a taken-down post, the
 # canaries), so it is loaded here. The seed only rewrites its own rows.
 echo "integration: seed"
 pnpm --filter @cms/db exec tsx prisma/seed.mts >/dev/null
+before=$(count_posts)
 
 echo "integration: search"
 pnpm --filter @cms/search exec vitest run --config vitest.integration.config.ts
@@ -66,3 +86,5 @@ if [[ $# -gt 0 ]]; then
 else
   pnpm --filter @cms/api exec vitest run --config vitest.integration.config.ts
 fi
+leftovers "search and API" "$before" "$(count_posts)"
+echo "integration: no posts left behind ($before)"

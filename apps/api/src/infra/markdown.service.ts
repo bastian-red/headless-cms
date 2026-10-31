@@ -7,9 +7,10 @@
  *
  * Two jobs:
  *
- * - `check(body)`: the save-time gate. One long-lived `RenderChecker` per
- *   process (a worker thread with a deadline), so a save pays thread start-up
- *   once, not every time. A body that fails is a 422 in the posts service.
+ * - `check(body)`: the save-time gate. One long-lived `RenderPool` per process
+ *   (worker threads with a deadline each), so a save pays thread start-up
+ *   once, not every time, and one hostile body cannot hold up every other
+ *   save. A body that fails is a 422 in the posts service.
  * - `render(revisionId, body)`: the content API's `html`. Revisions are
  *   immutable, so a render is cached by revision id forever, in a bounded map;
  *   a new publish is a new id. Every body that reaches here passed `check`
@@ -42,11 +43,11 @@ const CACHE_LIMIT = 500;
 @Injectable()
 export class MarkdownService implements OnModuleDestroy {
   private markdown: Promise<Markdown> | null = null;
-  private checker: Promise<InstanceType<MarkdownServer['RenderChecker']>> | null = null;
+  private checker: Promise<InstanceType<MarkdownServer['RenderPool']>> | null = null;
   private readonly cache = new Map<string, RenderedBody>();
 
   async check(body: string): Promise<RenderCheck> {
-    this.checker ??= import('@cms/markdown/server').then((m) => new m.RenderChecker());
+    this.checker ??= import('@cms/markdown/server').then((m) => new m.RenderPool());
     return (await this.checker).check(body);
   }
 

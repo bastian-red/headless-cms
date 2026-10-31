@@ -59,7 +59,9 @@ interface Job {
 }
 
 /**
- * One long-lived worker that checks bodies in order.
+ * One long-lived worker that checks bodies in order. A server keeps a
+ * `RenderPool` of these; a batch job that checks one body at a time (the
+ * search reindex) can use one directly.
  *
  * Starting a thread and loading the parser costs about 500 ms, which a save
  * should pay once per process, not once per keystroke-driven autosave. Checks
@@ -188,7 +190,77 @@ export class RenderChecker {
   }
 }
 
-/** A one-off check in its own worker. A server keeps a `RenderChecker` instead. */
+/**
+ * How many workers a server's pool keeps. One was a head-of-line block: a
+ * hostile body holds its worker for a whole budget, and every save on that
+ * process waited behind it. Two means one hostile save leaves the other worker
+ * free for everyone else, at a memory ceiling of 2 x 256 MB; each worker
+ * starts only when a check first needs it.
+ */
+export const RENDER_WORKERS = 2;
+
+interface PoolJob {
+  readonly markdown: string;
+  readonly options: { timeoutMs?: number };
+  readonly resolve: (result: RenderCheck) => void;
+}
+
+/**
+ * `RenderChecker`s sharing one queue: whichever worker is free takes the next
+ * check. A check is never assigned to a busy worker at submit time, so a fine
+ * body cannot end up behind a slow one while another worker sits idle. Each
+ * check keeps its own deadline, started when a worker picks it up.
+ */
+export class RenderPool {
+  private readonly idle: RenderChecker[];
+  private readonly all: RenderChecker[];
+  private readonly queue: PoolJob[] = [];
+  private closed = false;
+
+  constructor(size: number = RENDER_WORKERS) {
+    if (!Number.isInteger(size) || size < 1)
+      throw new RangeError('a pool needs at least one worker');
+    this.all = Array.from({ length: size }, () => new RenderChecker());
+    this.idle = [...this.all];
+  }
+
+  check(markdown: string, options: { timeoutMs?: number } = {}): Promise<RenderCheck> {
+    if (this.closed) return Promise.reject(new Error('RenderPool is closed'));
+    return new Promise((resolve) => {
+      this.queue.push({ markdown, options, resolve });
+      this.pump();
+    });
+  }
+
+  /** Stops every worker. Queued and running checks resolve as crashes. */
+  async close(): Promise<void> {
+    this.closed = true;
+    for (const job of this.queue.splice(0)) {
+      job.resolve({ ok: false, reason: 'crash', detail: 'the render pool was closed' });
+    }
+    await Promise.all(this.all.map((checker) => checker.close()));
+  }
+
+  private pump(): void {
+    while (!this.closed && this.queue.length > 0 && this.idle.length > 0) {
+      const checker = this.idle.shift()!;
+      const job = this.queue.shift()!;
+      void checker.check(job.markdown, job.options).then(
+        (result) => this.release(checker, job, result),
+        (error: unknown) =>
+          this.release(checker, job, { ok: false, reason: 'crash', detail: String(error) }),
+      );
+    }
+  }
+
+  private release(checker: RenderChecker, job: PoolJob, result: RenderCheck): void {
+    job.resolve(result);
+    this.idle.push(checker);
+    this.pump();
+  }
+}
+
+/** A one-off check in its own worker. A server keeps a `RenderPool` instead. */
 export async function checkRenderable(
   markdown: string,
   options: { timeoutMs?: number } = {},

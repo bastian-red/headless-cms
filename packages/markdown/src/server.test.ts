@@ -15,9 +15,8 @@ import { render } from './render.js';
 import type * as Server from './server.js';
 
 const built = new URL('../dist/server.js', import.meta.url);
-const { checkRenderable, RenderChecker, RENDER_BUDGET_MS } = (await import(
-  built.href
-)) as typeof Server;
+const { checkRenderable, RenderChecker, RenderPool, RENDER_BUDGET_MS, RENDER_WORKERS } =
+  (await import(built.href)) as typeof Server;
 
 const longRead = readFileSync(
   new URL('../../db/prisma/content/posts/the-long-way-to-a-fast-page.md', import.meta.url),
@@ -30,18 +29,28 @@ const hostile = readFileSync(
 );
 
 describe('checkRenderable', () => {
-  it('hands back exactly the text the in-process render gives, for the search index', async () => {
-    for (const body of [longRead, hostile]) {
-      const result = await checkRenderable(body);
-      expect(result.ok && result.text).toBe(render(body).text);
-    }
-    // Raw HTML and link addresses are dropped before text is taken, so the
-    // payloads are never indexed; a code sample is text and is.
-    const { text } = (await checkRenderable(hostile)) as { text: string };
-    expect(text).not.toContain('__quireHostile');
-    expect(text).toContain('A link that tries to run code');
-    expect(text).toContain("alert('this is a code sample');");
-  });
+  // Two worker checks of real bodies: about 3 s alone, and over vitest's 5 s
+  // default when turbo runs every package's gate lane at once.
+  it(
+    'hands back exactly the text the in-process render gives, for the search index',
+    {
+      timeout: 20_000,
+    },
+    async () => {
+      const texts: string[] = [];
+      for (const body of [longRead, hostile]) {
+        const result = await checkRenderable(body);
+        expect(result.ok && result.text).toBe(render(body).text);
+        if (result.ok) texts.push(result.text);
+      }
+      // Raw HTML and link addresses are dropped before text is taken, so the
+      // payloads are never indexed; a code sample is text and is.
+      const text = texts[1]!;
+      expect(text).not.toContain('__quireHostile');
+      expect(text).toContain('A link that tries to run code');
+      expect(text).toContain("alert('this is a code sample');");
+    },
+  );
 
   it('passes the seeded long read well inside the budget', async () => {
     const result = await checkRenderable(longRead);
@@ -69,12 +78,22 @@ describe('checkRenderable', () => {
     // Overflows the parser's stack, or runs past the deadline first.
     ['8,000 nested quotes', '> '.repeat(8000)],
   ])('stops %s at the deadline, and the host survives', async (_name, body) => {
-    const started = performance.now();
-    const result = await checkRenderable(body, { timeoutMs: 500 });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(['timeout', 'crash']).toContain(result.reason);
-    // Thread start-up plus the deadline; far below the seconds these take to finish.
-    expect(performance.now() - started).toBeLessThan(3500);
+    // The deadline starts once the worker is ready, so the worker is warmed
+    // first and only the hostile body is timed. Timing start-up as well made
+    // this a measure of machine load: 3.9 s with every gate lane running.
+    const checker = new RenderChecker();
+    try {
+      expect(await checker.check('Warm.')).toMatchObject({ ok: true });
+      const started = performance.now();
+      const result = await checker.check(body, { timeoutMs: 500 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(['timeout', 'crash']).toContain(result.reason);
+      // The deadline plus terminating the thread; far below the seconds
+      // these bodies take to finish.
+      expect(performance.now() - started).toBeLessThan(1500);
+    } finally {
+      await checker.close();
+    }
   });
 
   it('does not count thread start-up against the body', async () => {
@@ -142,5 +161,75 @@ describe('RenderChecker, the long-lived one a server keeps', () => {
     const pending = checker.check(slow, { timeoutMs: 5000 });
     await checker.close();
     expect(await pending).toMatchObject({ ok: false, reason: 'crash' });
+  });
+});
+
+describe('RenderPool, what the API keeps', () => {
+  const slow = `${'*_'.repeat(4000)}a${'_*'.repeat(4000)}`;
+
+  /** A pool with every worker started, so start-up is not part of what is timed. */
+  async function warmPool(size: number) {
+    const pool = new RenderPool(size);
+    const warm = await Promise.all(Array.from({ length: size }, () => pool.check('Warm.')));
+    expect(warm.every((r) => r.ok)).toBe(true);
+    return pool;
+  }
+
+  it('keeps more than one worker, so one hostile body cannot block a process', () => {
+    expect(RENDER_WORKERS).toBeGreaterThanOrEqual(2);
+  });
+
+  it('answers a fine save at once while a hostile body holds the other worker', async () => {
+    const pool = await warmPool(RENDER_WORKERS);
+    try {
+      const hostile = pool.check(slow, { timeoutMs: 1500 });
+      const started = performance.now();
+      const fine = await pool.check('## Fine\n\nA short body.');
+      const waited = performance.now() - started;
+      expect(fine).toMatchObject({ ok: true, words: 4 });
+      // One worker would have made it wait out the 1,500 ms deadline first.
+      expect(waited).toBeLessThan(500);
+      expect(await hostile).toMatchObject({ ok: false, reason: 'timeout' });
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it('answers each check with its own result when there are more checks than workers', async () => {
+    const pool = new RenderPool(2);
+    try {
+      const results = await Promise.all(
+        [1, 2, 3, 4, 5, 6].map((n) =>
+          pool.check(Array.from({ length: n }, () => 'word').join(' ')),
+        ),
+      );
+      expect(results.map((r) => (r.ok ? r.words : -1))).toEqual([1, 2, 3, 4, 5, 6]);
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it('recovers after a hostile body: the worker it killed is replaced', async () => {
+    const pool = await warmPool(1);
+    try {
+      expect(await pool.check(slow, { timeoutMs: 300 })).toMatchObject({ reason: 'timeout' });
+      expect(await pool.check('## After\n\nFine.')).toMatchObject({ ok: true, words: 2 });
+    } finally {
+      await pool.close();
+    }
+  });
+
+  it('settles running and queued checks when closed, and refuses new ones', async () => {
+    const pool = new RenderPool(1);
+    const running = pool.check(slow, { timeoutMs: 5000 });
+    const queued = pool.check('Queued.');
+    await pool.close();
+    expect(await running).toMatchObject({ ok: false, reason: 'crash' });
+    expect(await queued).toMatchObject({ ok: false, reason: 'crash' });
+    await expect(pool.check('Late.')).rejects.toThrow('closed');
+  });
+
+  it('refuses a pool with no workers', () => {
+    expect(() => new RenderPool(0)).toThrow(RangeError);
   });
 });

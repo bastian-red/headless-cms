@@ -24,7 +24,7 @@
  * none of the values.
  */
 import { BadRequestException, Injectable, type PipeTransform } from '@nestjs/common';
-import type { ZodType, ZodTypeDef } from 'zod';
+import type { ZodType } from 'zod';
 
 /** The response body a failed parse produces. Exported so the filter and the tests share it. */
 export interface InvalidBody {
@@ -42,16 +42,20 @@ export function invalidBody(fields: readonly string[]): InvalidBody {
 }
 
 /** The field names a zod error names, de-duplicated, in first-seen order. */
-export function fieldsOf(issues: readonly { path: (string | number)[] }[]): string[] {
+export function fieldsOf(issues: readonly { path: readonly PropertyKey[] }[]): string[] {
+  // Zod 4 types a path step as any property key; a parsed JSON body or query
+  // string only has string and number keys, and String() spells both as-is.
   return [
-    ...new Set(issues.map((issue) => issue.path.join('.')).filter((path) => path.length > 0)),
+    ...new Set(
+      issues.map((issue) => issue.path.map(String).join('.')).filter((path) => path.length > 0),
+    ),
   ];
 }
 
 /**
- * `ZodType<Out, ZodTypeDef, unknown>` rather than `ZodType<Out>`.
+ * `ZodType<Out, unknown>` rather than `ZodType<Out>`.
  *
- * Zod's third parameter is the schema's INPUT type, and it defaults to the
+ * Zod 4's second parameter is the schema's INPUT type, and it defaults to the
  * output. Any schema carrying a `.transform` -- every query-string schema here,
  * where a page size arrives as `'25'` and leaves as `25` -- has an input that
  * differs from its output, and `ZodType<Out>` refuses it. Widening the input to
@@ -60,7 +64,7 @@ export function fieldsOf(issues: readonly { path: (string | number)[] }[]): stri
  */
 @Injectable()
 export class ZodPipe<Out> implements PipeTransform<unknown, Out> {
-  constructor(private readonly schema: ZodType<Out, ZodTypeDef, unknown>) {}
+  constructor(private readonly schema: ZodType<Out, unknown>) {}
 
   transform(value: unknown): Out {
     const parsed = this.schema.safeParse(value);

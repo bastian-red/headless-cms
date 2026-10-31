@@ -156,8 +156,8 @@ revision the client says it started from.
   of the body (`details.bodyPatch`). The row lock (`SELECT ... FOR UPDATE`) is what makes that
   answer possible: without it the losers hit the unique revision number instead and learn nothing.
 - **A body that does not render in time is a 422, before anything is written.** Every save and
-  restore runs the body through `@cms/markdown/server`'s `RenderChecker` (one worker, 2 s
-  deadline). A pathological body is refused with `details.render: "timeout"` and the next save
+  restore runs the body through `@cms/markdown/server`'s `RenderPool` (two workers, a 2 s
+  deadline each). A pathological body is refused with `details.render: "timeout"` and the next save
   works, so a post can never hold a body the page cannot render.
 - **An editor publishes exactly what they reviewed.** A transition names `revisionId`; if the head
   moved since, it is a 409 and nothing changes. Publishing needs an excerpt (it is the feed

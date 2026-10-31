@@ -72,7 +72,14 @@ export async function boot(): Promise<Harness> {
       // The posts this suite made go with it (their revisions, documents and
       // redirects cascade), so live fixtures do not pile up across runs and
       // grow every crawl of the content API past its per-key budget.
-      await db.post.deleteMany({ where: { id: { in: created.splice(0) } } });
+      // Matched by author as well as by id: a test that creates a post
+      // through the API itself (posts.test.ts checks the slug derived from a
+      // title) never passes through newPost, and only the author is certain.
+      await db.post.deleteMany({
+        where: {
+          OR: [{ id: { in: created.splice(0) } }, { authorId: { in: users.splice(0) } }],
+        },
+      });
       await db.$disconnect();
       redis.disconnect();
       await app.close();
@@ -86,6 +93,9 @@ export async function boot(): Promise<Harness> {
  * keeps this lane at the DOCUMENTED budgets without borrowing another suite's
  * minute.
  */
+/** Every user `newUser` made in this process: `close()` removes their posts. */
+const users: string[] = [];
+
 export async function newUser(
   db: PrismaClient,
   label: string,
@@ -97,6 +107,7 @@ export async function newUser(
     data: { email, name: label, role, passwordHash: hashPassword(password) },
     select: { id: true },
   });
+  users.push(row.id);
   return { id: row.id, email, name: label, role, password };
 }
 

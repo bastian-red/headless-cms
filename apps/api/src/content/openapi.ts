@@ -4,17 +4,13 @@
  * document cannot describe fields the API does not send, because there is no
  * second definition to drift.
  *
- * `@asteasolutions/zod-to-openapi` 7.x, the line for zod 3 (8.x needs zod 4).
- * It patches `ZodType.prototype`, so it patches the `z` that `@cms/shared`
- * exports, the instance the schemas were made with. The app's own `zod`
- * import is the same copy under `nest build` but not under vitest's ESM
- * loader, and patching the wrong one is a 500 on this route.
+ * `@asteasolutions/zod-to-openapi` 9.x on zod 4. Components are named with
+ * zod's own `.meta({ id })`, not `registry.register()`: register calls
+ * `.openapi()`, which `extendZodWithOpenApi` has to patch in, and zod 4 copies
+ * methods onto each schema when it is built. `@cms/shared` builds these at
+ * import, before any patch could run, so the patch reaches none of them.
  */
-import {
-  OpenAPIRegistry,
-  OpenApiGeneratorV3,
-  extendZodWithOpenApi,
-} from '@asteasolutions/zod-to-openapi';
+import { OpenAPIRegistry, OpenApiGeneratorV3 } from '@asteasolutions/zod-to-openapi';
 import {
   slugSchema,
   v1ErrorSchema,
@@ -27,8 +23,6 @@ import {
   v1TagListSchema,
   z,
 } from '@cms/shared';
-
-extendZodWithOpenApi(z);
 
 /** Every route the document describes, as `METHOD /path`; the integration suite compares it with the router. */
 export const DOCUMENTED_ROUTES = [
@@ -59,10 +53,10 @@ export function openApiDocument() {
     429: json(v1ErrorSchema, 'Over the per-key rate limit.'),
   };
 
-  const PostSummaryList = registry.register('PostList', v1PostListSchema);
-  const Post = registry.register('Post', v1PostSchema);
-  const TagList = registry.register('TagList', v1TagListSchema);
-  const SearchResult = registry.register('SearchResult', v1SearchResultSchema);
+  const PostSummaryList = v1PostListSchema.meta({ id: 'PostList' });
+  const Post = v1PostSchema.meta({ id: 'Post' });
+  const TagList = v1TagListSchema.meta({ id: 'TagList' });
+  const SearchResult = v1SearchResultSchema.meta({ id: 'SearchResult' });
 
   registry.registerPath({
     method: 'get',

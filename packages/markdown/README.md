@@ -6,29 +6,35 @@ The one markdown renderer. Studio preview, post page, RSS feed and search index 
 ```ts
 import { render, renderHtml } from '@cms/markdown';
 import { toReact } from '@cms/markdown/react';
-import { RenderChecker, checkRenderable } from '@cms/markdown/server';
+import { RenderPool, checkRenderable } from '@cms/markdown/server';
 
 const { tree, outline, text, words, readingMinutes } = render(body);
 toReact(tree, { a: Link }); // page and preview: React elements
 renderHtml(render(body, { base: postUrl }).tree); // feed: HTML with absolute URLs
 await checkRenderable(body); // one-off: { ok, ms, words, text } or { ok: false, reason }
 
-const checker = new RenderChecker(); // a server: one long-lived worker
-await checker.check(body, { timeoutMs: 2000 });
-await checker.close();
+const pool = new RenderPool(); // a server: two long-lived workers, one queue
+await pool.check(body, { timeoutMs: 2000 });
+await pool.close();
 ```
 
-| Entry                  | Runs in            | For                                                                                    |
-| ---------------------- | ------------------ | -------------------------------------------------------------------------------------- |
-| `@cms/markdown`        | browser and server | `render`, `renderHtml`, the audit and the policy                                       |
-| `@cms/markdown/react`  | browser and server | `toReact` (needs `react` as a peer)                                                    |
-| `@cms/markdown/server` | Node only          | `RenderChecker` and `checkRenderable`: the render in a worker thread, under a deadline |
+| Entry                  | Runs in            | For                                                                                                 |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------------------------------- |
+| `@cms/markdown`        | browser and server | `render`, `renderHtml`, the audit and the policy                                                    |
+| `@cms/markdown/react`  | browser and server | `toReact` (needs `react` as a peer)                                                                 |
+| `@cms/markdown/server` | Node only          | `RenderPool`, `RenderChecker` and `checkRenderable`: the render in worker threads, under a deadline |
 
 `RenderChecker` keeps one worker and queues checks in order. A check's deadline starts when the
 worker picks it up, not when it was queued, so a slow body ahead of it cannot spend its time. A
 check that overruns or crashes the worker settles as refused, the worker is detached before it is
 terminated, and the next check gets a fresh one. Reusing the worker is what makes a save cheap:
 five checks on one worker finish in under 250 ms, and the test holds that number.
+
+A server keeps a `RenderPool`: `RENDER_WORKERS` (2) checkers sharing one queue, where whichever
+worker is free takes the next check. With one worker, a hostile body held every save on the
+process for a whole budget; with the pool, a fine save next to a hostile one is answered in
+milliseconds (the test bounds it at 500 ms against a 1,500 ms deadline, and it fails with one
+worker). A worker starts only when a check first needs it, and each is capped at 256 MB.
 
 A passing check carries the body's reader-visible `text` (the same string `render(body).text`
 gives, which `server.test.ts` holds), so the API writes the search document from the render it
@@ -49,6 +55,7 @@ ESM only, because the unified ecosystem is. The CommonJS API loads it with
 | Footnote links point at ids that exist                                                                                                             | `render.test.ts` footnotes, `surfaces.test.ts`                                 |
 | A body that renders slowly or crashes the parser is stopped at a deadline                                                                          | `server.test.ts`                                                               |
 | A hostile body does not poison the checks after it; queued checks keep their order and their own deadline                                          | `server.test.ts` RenderChecker                                                 |
+| A hostile body does not hold up a fine save on the same process                                                                                    | `server.test.ts` RenderPool                                                    |
 | Browser entry points import nothing from Node                                                                                                      | `surfaces.test.ts`                                                             |
 
 `src/server.test.ts` runs against `dist/` (the file `new Worker()` actually loads), so turbo builds
