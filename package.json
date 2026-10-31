@@ -52,7 +52,8 @@
       "qs": "^6.16.0"
     },
     "patchedDependencies": {
-      "@asteasolutions/zod-to-openapi@9.1.0": "patches/@asteasolutions__zod-to-openapi@9.1.0.patch"
+      "@asteasolutions/zod-to-openapi@9.1.0": "patches/@asteasolutions__zod-to-openapi@9.1.0.patch",
+      "next@16.4.1": "patches/next@16.4.1.patch"
     }
   }
 }

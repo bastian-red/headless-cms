@@ -26,6 +26,8 @@ No .env in the repo root.
 
   cp .env.example .env
   sed -i "s|^AUTH_SECRET=|AUTH_SECRET=$(openssl rand -base64 32)|" .env
+  sed -i "s|^CONTENT_API_KEY=.*|CONTENT_API_KEY=$(node scripts/new-api-key.mjs)|" .env
+  pnpm db:seed   # registers the key
 
 See README.md, "Running it".
 MSG
@@ -51,6 +53,16 @@ fi
 # Postgres and Redis being absent is the other failure that presents as a slow or
 # broken page rather than as an error, so it gets named up front too. Uses bash's
 # own /dev/tcp rather than nc, which is not installed everywhere.
+# The public site reads the content API with this key; without it every
+# public page fails on its first read. Format only: whether the API knows the
+# key is the seed's job (it registers it), and a 401 names itself.
+if [[ ! "${CONTENT_API_KEY:-}" =~ ^hcms_[A-Za-z0-9_-]{51}$ ]]; then
+  echo "CONTENT_API_KEY is not set to a content API key. Generate one, then reseed:" >&2
+  echo '  sed -i "s|^CONTENT_API_KEY=.*|CONTENT_API_KEY=$(node scripts/new-api-key.mjs)|" .env' >&2
+  echo "  pnpm db:seed" >&2
+  exit 1
+fi
+
 check_reachable() {
   local url="$1" label="$2" host port
   if [[ ! "$url" =~ ^[a-z+]+://([^@/]*@)?([^:/?#]+):([0-9]+) ]]; then

@@ -12,16 +12,18 @@
   // globalEnv values are hashed into the cache key, so this list is only for
   // names that change what gets BUILT. A secret must never appear here, because
   // its value would become part of a hash input.
-  "globalEnv": ["API_BASE_URL", "NODE_ENV"],
+  // APP_BASE_URL is baked into prerendered pages (canonical URLs, the feed,
+  // the sitemap) and CONTENT_AT_BUILD decides whether they are prerendered.
+  "globalEnv": ["API_BASE_URL", "APP_BASE_URL", "CONTENT_AT_BUILD", "NODE_ENV"],
 
   // Runtime configuration. Read by the process, never baked into an artefact,
   // so a change here must not invalidate a cached build.
   "globalPassThroughEnv": [
     "API_PORT",
-    "APP_BASE_URL",
     "APP_VERSION",
     "AUTH_SECRET",
     "AUTH_URL",
+    "CONTENT_API_KEY",
     "DATABASE_URL",
     "PORT",
     "PUBLISHER_HEALTH_PORT",
@@ -53,6 +55,14 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]
+    },
+    // The site's build reads published content from the API and prerenders it,
+    // so its output depends on data no input hash can see. A cached replay
+    // would serve last week's posts (or a deleted draft) with a green build.
+    "@cms/web#build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**"],
+      "cache": false
     },
     // The render check spawns dist/worker.js, so its test needs this package
     // built, not only its dependencies.

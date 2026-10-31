@@ -40,8 +40,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { render } from '@cms/markdown';
-import { searchDocument } from '@cms/shared';
-import { hashPassword } from '@cms/shared/server';
+import { API_KEY_PATTERN, searchDocument } from '@cms/shared';
+import { hashApiKey, hashPassword } from '@cms/shared/server';
 
 import { createPrismaClient, type PrismaClient } from '../src/client.ts';
 import { POSTS, TAGS, type Person, type PostSeed } from './content/catalog.ts';
@@ -267,14 +267,41 @@ async function seedContent(prisma: PrismaClient, people: Record<Person, string>)
   );
 }
 
+/**
+ * The public site's content API key. The site is a headless client like any
+ * other and reads `/v1/*` with a key; the key itself lives in `.env`
+ * (`CONTENT_API_KEY`), and the seed registers its hash, owned by the admin,
+ * so a fresh clone's site can read what the seed published. Re-running with
+ * a new key replaces the old one (same row). No key set: no row, and the
+ * site says so the first time it reads.
+ */
+async function seedSiteKey(prisma: PrismaClient, adminId: string): Promise<string> {
+  const key = process.env.CONTENT_API_KEY;
+  if (key === undefined || key === '') return 'no site key (CONTENT_API_KEY unset)';
+  if (!API_KEY_PATTERN.test(key)) {
+    throw new Error('CONTENT_API_KEY is not a content API key (hcms_ + 51 characters).');
+  }
+  const data = {
+    name: 'Public site',
+    prefix: key.slice(0, 'hcms_'.length + 8),
+    keyHash: hashApiKey(key),
+    createdById: adminId,
+    revokedAt: null,
+  };
+  const id = seedId('apikey', 'public-site');
+  await prisma.apiKey.upsert({ where: { id }, create: { id, ...data }, update: data });
+  return `site key ${data.prefix}…`;
+}
+
 const prisma = createPrismaClient();
 try {
   const people = await seedPeople(prisma);
   await seedContent(prisma, people);
+  const siteKey = await seedSiteKey(prisma, people.ines);
   const live = POSTS.filter((p) => p.state === 'live' || p.state === 'live-with-draft').length;
   console.info(
     `seed: 3 people (admin, editor, author), ${String(TAGS.length)} tags, ` +
-      `${String(POSTS.length)} posts (${String(live)} live)`,
+      `${String(POSTS.length)} posts (${String(live)} live), ${siteKey}`,
   );
 } finally {
   await prisma.$disconnect();

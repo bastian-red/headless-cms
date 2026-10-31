@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# The E2E lane: build in production mode, reseed, start all three processes
-# (api, web, publisher), run Playwright. Arguments go straight to
+# The E2E lane: build in production mode, reseed, start the API, build the
+# site against it, start all three processes (api, web, publisher), run
+# Playwright. Arguments go straight to
 # `playwright test`.
 #
 # This lane supplies its own environment and starts the apps directly, bypassing
@@ -48,6 +49,9 @@ trap cleanup EXIT
 . scripts/load-env.sh
 
 [[ -n "${AUTH_SECRET:-}" ]] || export AUTH_SECRET=ci-secret-at-least-32-characters-long
+# The site's content API key: the seed registers whatever this is.
+[[ -n "${CONTENT_API_KEY:-}" ]] || CONTENT_API_KEY="$(node scripts/new-api-key.mjs)"
+export CONTENT_API_KEY
 export PORT=""
 
 check_reachable() {
@@ -77,37 +81,6 @@ for url in "${API_BASE_URL}/health" "${APP_BASE_URL}/sign-in" "${PUBLISHER_INTER
   fi
 done
 
-echo "==> Building (production)"
-NODE_ENV=production pnpm build >"$LOG_DIR/build.log" 2>&1 || {
-  tail -40 "$LOG_DIR/build.log" >&2
-  exit 1
-}
-
-# Before anything runs: a public page that turned dynamic still renders
-# correctly, so no spec below would notice. Only the build output can.
-echo "==> Checking the rendering matrix against the build"
-node scripts/render-check.mjs
-
-echo "==> Applying migrations and seeding"
-pnpm --filter @cms/db run migrate:deploy >"$LOG_DIR/migrate.log" 2>&1 || {
-  tail -30 "$LOG_DIR/migrate.log" >&2
-  exit 1
-}
-# The seed restores its own accounts, so a previous run never decides this
-# run's outcome. Specs that change things do it on rows they create themselves.
-pnpm --filter @cms/db run seed >"$LOG_DIR/seed.log" 2>&1 || {
-  tail -30 "$LOG_DIR/seed.log" >&2
-  exit 1
-}
-
-echo "==> Starting api, web, publisher (logs in ${LOG_DIR})"
-node apps/api/dist/main.js >"$API_LOG" 2>&1 &
-API_PID=$!
-node services/publisher/dist/main.js >"$PUB_LOG" 2>&1 &
-PUB_PID=$!
-(cd apps/web && exec node_modules/.bin/next start -p "$WEB_PORT") >"$WEB_LOG" 2>&1 &
-WEB_PID=$!
-
 wait_for() {
   local url="$1" name="$2" pid="$3" log="$4"
   local i
@@ -124,8 +97,54 @@ wait_for() {
   tail -30 "$log" >&2
   exit 1
 }
+
+# The order is the point. The site prerenders from the content API, so the
+# API has to be built, migrated, seeded and serving BEFORE the site is built;
+# a site built first would have nothing to prerender, and the check after the
+# build would be grading an empty site.
+echo "==> Building the API, publisher and packages (production)"
+NODE_ENV=production pnpm exec turbo run build --filter='!@cms/web' >"$LOG_DIR/build.log" 2>&1 || {
+  tail -40 "$LOG_DIR/build.log" >&2
+  exit 1
+}
+
+echo "==> Applying migrations and seeding"
+pnpm --filter @cms/db run migrate:deploy >"$LOG_DIR/migrate.log" 2>&1 || {
+  tail -30 "$LOG_DIR/migrate.log" >&2
+  exit 1
+}
+# The seed restores its own accounts and registers the site's content API key,
+# so a previous run never decides this run's outcome. Specs that change things
+# do it on rows they create themselves.
+pnpm --filter @cms/db run seed >"$LOG_DIR/seed.log" 2>&1 || {
+  tail -30 "$LOG_DIR/seed.log" >&2
+  exit 1
+}
+
+echo "==> Starting api, publisher (logs in ${LOG_DIR})"
+node apps/api/dist/main.js >"$API_LOG" 2>&1 &
+API_PID=$!
+node services/publisher/dist/main.js >"$PUB_LOG" 2>&1 &
+PUB_PID=$!
 wait_for "${API_BASE_URL}/health" api "$API_PID" "$API_LOG"
 wait_for "${PUBLISHER_INTERNAL_URL}/health" publisher "$PUB_PID" "$PUB_LOG"
+
+echo "==> Building the site against the seeded API (production)"
+NODE_ENV=production pnpm exec turbo run build --filter=@cms/web >>"$LOG_DIR/build.log" 2>&1 || {
+  tail -40 "$LOG_DIR/build.log" >&2
+  exit 1
+}
+
+# Before anything runs: a public page that turned dynamic still renders
+# correctly, so no spec below would notice. Only the build output can. With
+# --content it also requires every seeded live post to have been prerendered
+# and finds no draft or pending-comment text anywhere in .next/.
+echo "==> Checking the rendering matrix and the build's content"
+node scripts/render-check.mjs --content
+
+echo "==> Starting web"
+(cd apps/web && exec node_modules/.bin/next start -p "$WEB_PORT") >"$WEB_LOG" 2>&1 &
+WEB_PID=$!
 wait_for "${APP_BASE_URL}/sign-in" web "$WEB_PID" "$WEB_LOG"
 
 echo "==> Running Playwright"

@@ -13,7 +13,8 @@
 #
 # Assert on content, never on a status code. A broken app answers 200 with an
 # error page. So this requires, across all three processes: every /health ok
-# (api, publisher); a sign-in through Auth.js; the studio rendering the seeded
+# (api, publisher); the public archive read through the content API with the
+# site's key; a sign-in through Auth.js; the studio rendering the seeded
 # editor's name and the role the API read from Postgres (GET /auth/me, so the
 # web -> service token -> API -> database path is whole); and /status reading
 # both services as up through the API.
@@ -64,7 +65,8 @@ seed_const() { sed -n "s/^const $1 = '\([^']*\)';.*/\1/p" "$SEED"; }
 EDITOR_EMAIL="$(seed_const EDITOR_EMAIL)"
 EDITOR_PASSWORD="$(seed_const EDITOR_PASSWORD)"
 EDITOR_NAME="$(seed_const EDITOR_NAME)"
-for pair in "EDITOR_EMAIL:$EDITOR_EMAIL" "EDITOR_PASSWORD:$EDITOR_PASSWORD" "EDITOR_NAME:$EDITOR_NAME"; do
+LONG_FORM_SLUG="$(sed -n "s/^export const LONG_FORM_SLUG = '\([^']*\)';.*/\1/p" packages/db/prisma/content/catalog.ts)"
+for pair in "EDITOR_EMAIL:$EDITOR_EMAIL" "EDITOR_PASSWORD:$EDITOR_PASSWORD" "EDITOR_NAME:$EDITOR_NAME" "LONG_FORM_SLUG:$LONG_FORM_SLUG"; do
   [[ -n "${pair#*:}" ]] || die "could not read ${pair%%:*} out of ${SEED}."
 done
 
@@ -166,5 +168,15 @@ grep -qF "Every service is up" <<<"$status_page" || {
   die "/status does not say every service is up."
 }
 
+# The public site is a content API client with its own key. CONTENT_API_KEY
+# reaches the web process only if turbo passes it through (strict env mode);
+# without it every public page is an error page that still answers.
+echo "==> Checking the public archive lists the seeded posts through the content API"
+archive="$(curl -s "${APP_BASE_URL}/posts")"
+grep -qF "href=\"/posts/${LONG_FORM_SLUG}\"" <<<"$archive" || {
+  tail -60 "$LOG" >&2
+  die "/posts does not link the seeded long read. CONTENT_API_KEY never reached the web process, or the seed did not register it."
+}
+
 echo
-echo "PASS: pnpm dev serves api, web and publisher, configured by .env alone; sign-in reaches Postgres through the API."
+echo "PASS: pnpm dev serves api, web and publisher, configured by .env alone; sign-in reaches Postgres through the API; the public site reads the content API with its key."

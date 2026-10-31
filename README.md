@@ -8,12 +8,14 @@ revalidated by tag the moment a publish lands, with no rebuild. A versioned cont
 same published content to any other frontend, and the public site reads through it like any other
 client. Nothing unpublished may ever reach a page, a feed, a sitemap or a search result.
 
-> **Status: build step 5 of 11, search.** Sign-in, the three roles, the publisher process, health
-> and status, every test lane and CI are in place, and so are the content schema, a seeded demo
-> publication of forty posts, the one sanitizing markdown renderer, the API (posts and revisions
-> with stale-save conflicts, the editorial workflow, content API v1 and API keys) and full-text
-> search over published posts, benchmarked at p95 33 ms over 2,000 of them. The rendering matrix,
-> SEO, comments, the studio editor and the visual identity arrive in the following steps. This README is rewritten as each one lands (demo GIF included at the end);
+> **Status: build step 6 of 11, the public site.** Sign-in, the three roles, the publisher process,
+> health and status, every test lane and CI are in place, and so are the content schema, a seeded
+> demo publication of forty posts, the one sanitizing markdown renderer, the API (posts and
+> revisions with stale-save conflicts, the editorial workflow, content API v1 and API keys),
+> full-text search, and the public site: every post, tag and author page prerendered from the
+> content API, the feed, the sitemap, JSON-LD and a social card per post. Publish-time
+> revalidation (the publisher's webhooks), comments, the studio editor and the visual identity
+> arrive in the following steps. This README is rewritten as each one lands (demo GIF included at the end);
 > nothing below describes a feature that is not in the code.
 
 ```mermaid
@@ -22,7 +24,8 @@ flowchart LR
   writer([Author / Editor / Admin]) --> web
 
   subgraph app ["App"]
-    web["apps/web<br/>Next.js 16<br/>public site + studio"] -->|"service token<br/>(HS256, 120 s)"| api["apps/api<br/>NestJS<br/>+ services/search (library)"]
+    web["apps/web<br/>Next.js 16<br/>public site + studio"] -->|"studio: service token<br/>(HS256, 120 s)"| api["apps/api<br/>NestJS<br/>+ services/search (library)"]
+    web -->|"public site: content API v1<br/>(API key, cached by tag)"| api
   end
   publisher["services/publisher<br/>Node"]
 
@@ -53,10 +56,10 @@ the same API an outside client would use.
   because `@nestjs/throttler` v6 applies every named budget to every route unless it is skipped.
 - **Operability.** `GET /health` on the API and the publisher runs a real `SELECT 1` and `PING`, and
   answers 503 naming the failing check. `/status` shows both, fed by the API.
-- **A static front page that stays static.** `scripts/render-check.mjs` reads the build's prerender
-  manifest and fails the E2E lane if `/` (or any route planned as static) starts rendering per
-  request. That is the failure a single `cookies()` call in a shared layout causes, and no
-  content-level test would notice it.
+- **Static pages that stay static.** `scripts/render-check.mjs` reads the build's prerender
+  manifest and fails the E2E lane if any route leaves its planned row in the rendering matrix
+  (below). That is the failure a single `cookies()` call in a shared layout causes: the build still
+  succeeds and every content test still passes, so only the manifest can see it.
 
 ## The content model
 
@@ -232,6 +235,65 @@ measurements):
   the common words matching every post. The first design measured 513 ms; the README in
   `services/search` says what each step bought.
 
+## The public site
+
+The public blog, "Quire", is a client of the content API like any other: it holds an API key
+(`CONTENT_API_KEY`, registered by the seed) and no database access. Every read is a `fetch` that
+Next caches and tags with the names in `packages/shared/src/contracts/revalidation.ts`
+(`posts`, `post:<slug>`, `tag:<slug>`, `author:<id>`), the same names the API writes into its
+revalidation events, so a publish can invalidate exactly the pages that show it.
+
+### Rendering matrix
+
+Read from the build, not asserted from memory: `scripts/render-check.mjs` compares
+`.next/prerender-manifest.json` with this table in the E2E lane, and fails it on any drift.
+
+| Route                                               | Strategy                                                                             | Why                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `/`, `/posts`, `/tags`, `/feed.xml`, `/sitemap.xml` | Static, revalidated by tag (1 h safety net)                                          | Same bytes for every reader until something is published    |
+| `/posts/[slug]`, `/tags/[tag]`, `/authors/[id]`     | Every known value prerendered; a new one rendered once on first request, then cached | A post published after the build needs no rebuild           |
+| `/posts/[slug]/card.png`                            | Prerendered per post, like the page                                                  | The social card is an image crawlers fetch once             |
+| `/robots.txt`                                       | Static                                                                               | No data                                                     |
+| `/search`                                           | Per request, `noindex, follow`                                                       | Every query is different, and a results page is not content |
+| `/studio`, `/sign-in`, `/status`                    | Per request                                                                          | They read the session or live service state                 |
+
+Classic ISR rather than Cache Components (`cacheComponents`): with it on, the studio, sign-in and
+status routes would become partial-prerender shells too, and the manifest would no longer say in
+one word what each public route is. `revalidate = 3600` on every content route is the safety net
+for a lost revalidation event, and a gate test holds every route, the loader and the checker to the
+same number.
+
+The build also proves its content: the E2E lane builds against the seeded API, then checks that
+all 36 live posts were prerendered and scans every file under `.next/` for the draft and comment
+canaries (with the long-form post as the positive control, so a scan that read nothing fails).
+
+### Technical SEO
+
+- **Every indexable page** has its own title and description, a canonical URL to itself, the feed
+  link, and no `robots` meta. The E2E lane walks the sitemap and checks each one, with no two pages
+  sharing a title or a description.
+- **JSON-LD:** `BlogPosting` and `BreadcrumbList` on posts, `BreadcrumbList` on listings, `WebSite`
+  with a `SearchAction` on the front page. It is written as the script's text child, never raw
+  HTML, with `<`, `>`, `&`, U+2028 and U+2029 escaped, so no title can end the element; a hostile
+  title round-trips in the gate lane.
+- **Dates that agree:** the sitemap's `lastmod`, `dateModified` and `article:modified_time` are
+  all the later of the first publish and the shown revision, so a revision written before the post
+  went live never makes it look modified before it was published.
+- **The social card** is a 1200×630 PNG per post at `/posts/<slug>/card.png` (`next/og`),
+  referenced by Open Graph and `summary_large_image`. A route handler, not `opengraph-image.tsx`,
+  so its address is stable and it prerenders.
+- **RSS 2.0** with the newest 20 posts in full: the same renderer as the page, URLs made absolute,
+  `]]>` split across CDATA sections, characters XML forbids removed, and `lastBuildDate` taken from
+  the newest post so the same content gives the same bytes.
+- **Old slugs answer 308** to the current one; a missing or taken-down post is a 404 and leaves
+  the sitemap and the feed. `robots.txt` keeps crawlers out of `/studio`, `/preview`, `/sign-in`
+  and `/api/`.
+
+Next 16.4.1 sent `Location` twice on the first render of an on-demand redirect (it sets the header
+while rendering, then replays the cache entry's headers onto the same response).
+`patches/next@16.4.1.patch` skips a replayed header the response already carries with the same
+value, and the E2E lane asserts exactly one `Location` on a fresh build.
+
 ## Running it
 
 Requires Node 20+, pnpm 9 and Docker.
@@ -240,12 +302,13 @@ Requires Node 20+, pnpm 9 and Docker.
 pnpm install
 cp .env.example .env
 sed -i "s|^AUTH_SECRET=|AUTH_SECRET=$(openssl rand -base64 32)|" .env
+sed -i "s|^CONTENT_API_KEY=.*|CONTENT_API_KEY=$(node scripts/new-api-key.mjs)|" .env
 docker compose -f infra/docker-compose.yml up -d     # Postgres :5444, Redis :6390
-pnpm db:deploy && pnpm db:seed                        # the seed writes search documents too
+pnpm db:deploy && pnpm db:seed                        # registers the site's key, writes search documents
 pnpm dev                                              # web :3000, api :4000, publisher :4400
 ```
 
-Open <http://localhost:3000/studio> and sign in with a seeded account (local accounts for a local
+The public site is at <http://localhost:3000>. Open <http://localhost:3000/studio> and sign in with a seeded account (local accounts for a local
 database, published on purpose):
 
 | Role   | Email              | Password               |
@@ -255,26 +318,29 @@ database, published on purpose):
 | Author | `mara@quire.test`  | `author-password-2026` |
 
 The whole stack in containers: `docker compose -f infra/docker-compose.yml --profile app up -d --build`.
+An image build has no API to prerender from, so `infra/Dockerfile.web` sets
+`CONTENT_AT_BUILD=deferred`: the public pages render on their first request instead, and their
+content reads are still cached by tag. Any other build needs the API running, and says so.
 
-`pnpm dev` runs `scripts/dev.sh`, which loads `.env`, checks `AUTH_SECRET` and that Postgres and
-Redis answer, then starts turbo. Turbo reads no `.env` itself and runs in strict environment mode,
+`pnpm dev` runs `scripts/dev.sh`, which loads `.env`, checks `AUTH_SECRET` and `CONTENT_API_KEY`
+and that Postgres and Redis answer, then starts turbo. Turbo reads no `.env` itself and runs in strict environment mode,
 so without the wrapper the API would boot with no secret.
 
 ## Testing
 
 | Lane                 | Command                       | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | -------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate (every commit)  | `pnpm test`                   | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML`                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Gate (every commit)  | `pnpm test`                   | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML`; the SEO builders (descriptions, JSON-LD escaping, RSS well-formed whatever a post says, RFC 822 dates, `dateModified` never before `datePublished`); every public route on one revalidate window, none reading the request, none dropping the feed link                                                                                                                                             |
 | Environment contract | `pnpm env:contract`           | Source, `.env.example` and `turbo.json` agree in all four directions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Seed check           | `./scripts/seed-check.sh`     | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row or a live search document, one live search document per live post, every internal link in a live post resolves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Integration          | `./scripts/integration.sh`    | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race) and the search documents' `live` flag following every publish, then the search query on the seeded corpus (title tier, no draft or canary findable, query syntax, every snippet path, cursor crawl), then the seeded newsroom behind the real Nest graph on Postgres and Redis at the documented budgets: sign-in and the default-closed guard; every studio route against every role (403 exactly where the role table says no, before the body is read); the five-way stale-save race; the render deadline; every workflow transition and its outbox row; the content API's pagination, filters, ETags, 308/410/404 and a canary crawl of every response; the OpenAPI document matching the router; the last-admin race; API key revocation |
 | Search bench         | `pnpm search:bench`           | p95 < 50 ms over 2,000 published posts and 4,500 documents, 25 query shapes, through the exact function `/v1/search` calls; the GIN index used by a selective query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Red proofs           | `node scripts/red-proofs.mjs` | Breaks each guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags; for search the title tier, both draft defenses, the exclusion rule, the snippet window's check, the cursor binding, control-character stripping, and the first design's ranking against the bench), runs the suite that claims it, and fails unless that suite goes red                                                                                                                                                                                                                                                                                                                                                                               |
-| E2E                  | `./scripts/e2e.sh`            | Production build, the rendering matrix, Chromium and Firefox: sign-in per role, deep links, open-redirect refusal, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Dev smoke            | `./scripts/dev-smoke.sh`      | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves a studio that read the editor from Postgres                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| E2E                  | `./scripts/e2e.sh`            | Production build against the seeded API, the rendering matrix and its content (36 posts prerendered, no canary anywhere in `.next/`), Chromium and Firefox: every sitemap page (200, unique title and description, self canonical, feed link, JSON-LD), the post's JSON-LD and 1200×630 card, 308 with one `Location` and 404s, the feed against the API, robots, search (noindex, marks, paging), sign-in per role, deep links, open-redirect refusal, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px                                                                                                                                                                                                                                                                                                                     |
+| Dev smoke            | `./scripts/dev-smoke.sh`      | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves a studio that read the editor from Postgres and a public archive read through the content API with the site's key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
-The pre-commit hook runs gitleaks, the environment contract, the invisible-character scan, prettier
-and the gate lane. CI runs every lane above plus lint, typecheck, a dependency audit and the three
+The pre-commit hook runs gitleaks, the environment contract, the invisible-character scan, the
+render-check and self-import self-tests, the lockfile check and the gate lane. CI runs every lane above plus lint, typecheck, a dependency audit and the three
 Docker image builds.
 
 ## Configuration

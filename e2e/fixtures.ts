@@ -37,6 +37,36 @@ export const PEOPLE = {
 } as const;
 export type Person = keyof typeof PEOPLE;
 
+/**
+ * Facts about the seeded publication, read out of the catalog the seed writes
+ * from (`packages/db/prisma/content/catalog.ts`), never retyped here.
+ */
+const CATALOG = readFileSync(
+  join(__dirname, '..', 'packages', 'db', 'prisma', 'content', 'catalog.ts'),
+  'utf8',
+);
+
+function catalogConst(name: string): string {
+  const match = new RegExp(`export const ${name} = '([^']+)';`, 'u').exec(CATALOG);
+  if (!match) throw new Error(`Could not read ${name} out of the seed catalog.`);
+  return match[1]!;
+}
+
+/** The slug of the one post that was public and has been taken down. */
+function takenDownSlug(): string {
+  const match = /slug: '([^']+)',(?:(?!slug: )[\s\S])*?state: 'unpublished',/u.exec(CATALOG);
+  if (!match) throw new Error('The seed catalog has no unpublished post.');
+  return match[1]!;
+}
+
+export const SEEDED = {
+  longForm: catalogConst('LONG_FORM_SLUG'),
+  renamedTo: catalogConst('RENAMED_SLUG'),
+  renamedFrom: catalogConst('RENAMED_FROM'),
+  takenDown: takenDownSlug(),
+  canaries: [catalogConst('DRAFT_CANARY'), catalogConst('COMMENT_CANARY')],
+};
+
 export const API_BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:4000';
 export const PUBLISHER_URL = process.env.PUBLISHER_INTERNAL_URL ?? 'http://localhost:4400';
 

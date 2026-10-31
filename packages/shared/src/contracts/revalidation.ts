@@ -1,11 +1,13 @@
 import { z } from 'zod';
 
 /**
- * Cache tags: the names the public site tags its cached pages with
- * (`cacheTag`) and the API puts in a revalidation event when what readers see
- * changes. One spelling for both sides, or a publish revalidates nothing.
+ * Cache tags: the names the public site tags its cached content reads with
+ * (`fetch(..., { next: { tags } })` in apps/web/lib/content.ts) and the API
+ * puts in a revalidation event when what readers see changes. One spelling for
+ * both sides, or a publish revalidates nothing.
  *
- * - `posts`: every listing (home, feed, sitemap, search results).
+ * - `posts`: every listing (home, archive, tag index, feed, sitemap) and every
+ *   tag and author page. Search results are read per request, never cached.
  * - `post:<slug>`: one post page. A rename names both slugs.
  * - `tag:<slug>`: one tag page.
  * - `author:<id>`: one author page.

@@ -45,6 +45,7 @@ jobs:
       - run: pnpm scan:invisible:self-test
       - run: pnpm scan:invisible
       - run: pnpm scan:self-import:self-test
+      - run: node scripts/render-check.mjs --self-test
       - run: pnpm scan:self-import
       - name: Install gitleaks
         shell: bash
@@ -148,6 +149,7 @@ jobs:
         run: |
           cp .env.example .env
           sed -i "s|^AUTH_SECRET=|AUTH_SECRET=$(openssl rand -base64 32)|" .env
+          sed -i "s|^CONTENT_API_KEY=.*|CONTENT_API_KEY=$(node scripts/new-api-key.mjs)|" .env
       - run: pnpm db:generate
       - run: pnpm db:deploy
       - run: pnpm db:seed

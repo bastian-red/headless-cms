@@ -28,7 +28,9 @@ export REDIS_URL="${INTEGRATION_REDIS_URL:-${BASE_REDIS%/}/1}"
   { echo "integration: refusing to run against the dev database (${BASE_DB%%\?*})." >&2; exit 1; }
 
 echo "integration: build"
-pnpm exec turbo run build --output-logs=errors-only >/dev/null
+# Not the site: its build prerenders from a running API, and this lane tests
+# the API itself (e2e.sh builds the site against one).
+pnpm exec turbo run build --filter='!@cms/web' --output-logs=errors-only >/dev/null
 
 echo "integration: database ${DATABASE_URL%%\?*}, redis ${REDIS_URL}"
 pnpm --filter @cms/db exec node -e "

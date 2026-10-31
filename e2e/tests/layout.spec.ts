@@ -7,7 +7,7 @@
  */
 import type { Page } from '@playwright/test';
 
-import { expect, signIn, test } from '../fixtures';
+import { SEEDED, expect, signIn, test } from '../fixtures';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -18,7 +18,18 @@ async function overflow(page: Page): Promise<number> {
 }
 
 test('public routes do not scroll sideways at 390 px', async ({ page }) => {
-  for (const path of ['/', '/sign-in', '/status', '/no-such-page']) {
+  for (const path of [
+    '/',
+    '/posts',
+    '/tags',
+    '/tags/caching',
+    // The long read: code blocks and tables are where a page slides sideways.
+    `/posts/${SEEDED.longForm}`,
+    '/search?q=caching',
+    '/sign-in',
+    '/status',
+    '/no-such-page',
+  ]) {
     await page.goto(path);
     expect(await overflow(page), path).toBeLessThanOrEqual(0);
   }

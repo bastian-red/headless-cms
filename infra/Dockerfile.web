@@ -23,6 +23,11 @@ RUN pnpm install --frozen-lockfile --offline --ignore-scripts
 # the runtime secret, which comes from the environment the container runs with.
 ENV NODE_ENV=production
 ENV AUTH_SECRET=build-time-placeholder-secret-32chars
+# No content API inside an image build. Deferred: the public pages render on
+# their first request (and their reads are still cached by tag), instead of the
+# build failing for want of an API to prerender from. CONTENT_API_KEY is read at
+# request time, from the environment the container runs with.
+ENV CONTENT_AT_BUILD=deferred
 RUN pnpm exec turbo run build --filter=@cms/web...
 RUN mkdir -p apps/web/public
 

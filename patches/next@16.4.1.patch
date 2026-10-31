@@ -1,0 +1,32 @@
+diff --git a/dist/build/templates/app-page-runtime.js b/dist/build/templates/app-page-runtime.js
+index fc5eef172bc3e2567ab414416590f85fb49e4ef1..350956196c40021e65b415f95747426a67d4d683 100644
+--- a/dist/build/templates/app-page-runtime.js
++++ b/dist/build/templates/app-page-runtime.js
+@@ -1366,6 +1366,11 @@ function createAppPageEntrypoint({ tree, page, pathname, require: __next_app_req
+                     }
+                     for (let [key, value] of Object.entries(headers)){
+                         if (typeof value === 'undefined') continue;
++                        // Patched (headless-cms): on a cache MISS the render has already set
++                        // these headers on this same response, so appending them again sent
++                        // `location` twice on a fresh on-demand redirect. Skip a single-valued
++                        // header the response already carries with the same value.
++                        if (!Array.isArray(value) && res.getHeader(key) !== undefined && String(res.getHeader(key)) === String(value)) continue;
+                         if (Array.isArray(value)) {
+                             for (const v of value){
+                                 res.appendHeader(key, v);
+diff --git a/dist/esm/build/templates/app-page-runtime.js b/dist/esm/build/templates/app-page-runtime.js
+index 96beb1b9bd89e6eb55e9d0cfbed49fa3aa9c42ea..8333ce8b9c6093b3eda7b488b12e6115d288febc 100644
+--- a/dist/esm/build/templates/app-page-runtime.js
++++ b/dist/esm/build/templates/app-page-runtime.js
+@@ -1385,6 +1385,11 @@ export function createAppPageEntrypoint({ tree, page, pathname, require: __next_
+                     }
+                     for (let [key, value] of Object.entries(headers)){
+                         if (typeof value === 'undefined') continue;
++                        // Patched (headless-cms): on a cache MISS the render has already set
++                        // these headers on this same response, so appending them again sent
++                        // `location` twice on a fresh on-demand redirect. Skip a single-valued
++                        // header the response already carries with the same value.
++                        if (!Array.isArray(value) && res.getHeader(key) !== undefined && String(res.getHeader(key)) === String(value)) continue;
+                         if (Array.isArray(value)) {
+                             for (const v of value){
+                                 res.appendHeader(key, v);

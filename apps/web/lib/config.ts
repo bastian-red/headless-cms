@@ -42,3 +42,30 @@ export function authSecret(): string {
  * readers and crawlers use, never the API's.
  */
 export const appBaseUrl = process.env.APP_BASE_URL ?? 'http://localhost:3000';
+
+/**
+ * The public site's content API key (`hcms_...`). The site reads published
+ * content through `GET /v1/*` like any other headless client, so it holds a
+ * key; `pnpm db:seed` registers this one (by its hash) for local use.
+ *
+ * Asserted at the first read rather than at import: the studio and sign-in
+ * never need it, and a missing key should name itself, not surface as a 401.
+ */
+export function contentApiKey(): string {
+  const key = process.env.CONTENT_API_KEY;
+  if (key === undefined || !/^hcms_[A-Za-z0-9_-]{51}$/u.test(key)) {
+    throw new Error(
+      'CONTENT_API_KEY must be a content API key (hcms_ + 51 characters). Generate one and ' +
+        'reseed so the API knows it: see README.md, "Running it".',
+    );
+  }
+  return key;
+}
+
+/**
+ * `deferred` builds without the API: every public page renders per request
+ * and only the content reads are cached. Set by `infra/Dockerfile.web`, whose
+ * build has no API to read; any other build prerenders, and fails if the API
+ * is unreachable rather than shipping empty pages.
+ */
+export const contentAtBuild = process.env.CONTENT_AT_BUILD === 'deferred' ? 'deferred' : 'required';

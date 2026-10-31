@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pre-commit gate. Six checks, all mandatory, none skippable with --no-verify
+ * Pre-commit gate. Seven checks, all mandatory, none skippable with --no-verify
  * without also skipping the others:
  *
  *   1. gitleaks protect --staged  — secret detection is deterministic work, so it
@@ -15,6 +15,8 @@
  *   4. self-import.mjs            — a package importing itself by name resolves
  *      to its own dist/, which works on any machine that has built once and
  *      fails on a clean checkout. Only CI would see it otherwise.
+ *   4b. render-check --self-test  — the rendering-matrix checker against built
+ *      manifests: a checker that stops checking would pass every build.
  *   5. frozen lockfile           — CI installs with --frozen-lockfile, so a
  *      package.json the lockfile does not match fails every CI job at install.
  *   6. pnpm test                  — the gate lane only (fast, no network, no DB).
@@ -61,6 +63,12 @@ const steps = [
     name: 'invisible characters',
     cmd: 'node',
     args: ['scripts/invisible-chars.mjs'],
+    required: true,
+  },
+  {
+    name: 'render-check (self-test)',
+    cmd: 'node',
+    args: ['scripts/render-check.mjs', '--self-test'],
     required: true,
   },
   {

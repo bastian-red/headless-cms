@@ -21,7 +21,7 @@ import './globals.css';
  */
 export const metadata: Metadata = {
   metadataBase: new URL(appBaseUrl),
-  title: { default: 'headless-cms', template: '%s | headless-cms' },
+  title: { default: 'headless-cms', template: '%s · headless-cms' },
   description:
     'A headless content system with its own blog: markdown, immutable revisions, static pages that update the moment an editor publishes.',
 };
