@@ -46,7 +46,7 @@ importers:
   apps/api:
     dependencies:
       '@asteasolutions/zod-to-openapi':
-        specifier: ^9.1.0
+        specifier: 9.1.0
         version: 9.1.0(patch_hash=mnl2yetqgtekhmem2dwzw3qxui)(zod@4.6.7)
       '@cms/db':
         specifier: workspace:*

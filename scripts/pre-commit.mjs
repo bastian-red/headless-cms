@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pre-commit gate. Five checks, all mandatory, none skippable with --no-verify
+ * Pre-commit gate. Six checks, all mandatory, none skippable with --no-verify
  * without also skipping the others:
  *
  *   1. gitleaks protect --staged  — secret detection is deterministic work, so it
@@ -15,7 +15,9 @@
  *   4. self-import.mjs            — a package importing itself by name resolves
  *      to its own dist/, which works on any machine that has built once and
  *      fails on a clean checkout. Only CI would see it otherwise.
- *   5. pnpm test                  — the gate lane only (fast, no network, no DB).
+ *   5. frozen lockfile           — CI installs with --frozen-lockfile, so a
+ *      package.json the lockfile does not match fails every CI job at install.
+ *   6. pnpm test                  — the gate lane only (fast, no network, no DB).
  *
  * Integration, load and E2E are deliberately NOT here: they need Postgres,
  * Redis, four running processes and browsers. Running them on every commit
@@ -71,6 +73,15 @@ const steps = [
     name: 'self-imports',
     cmd: 'node',
     args: ['scripts/self-import.mjs'],
+    required: true,
+  },
+  {
+    // CI installs with --frozen-lockfile; a local install never is. A version
+    // pin changed after the last install (e2fad2f) passed every local lane and
+    // failed all eight CI jobs at install. About 2 s, and nothing is written.
+    name: 'lockfile matches every package.json (as CI installs)',
+    cmd: 'pnpm',
+    args: ['install', '--frozen-lockfile', '--lockfile-only', '--ignore-scripts'],
     required: true,
   },
   {

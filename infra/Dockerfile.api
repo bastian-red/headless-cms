@@ -15,7 +15,10 @@ WORKDIR /repo
 
 # --- fetch: a layer keyed on the lockfile alone ------------------------------
 FROM base AS fetch
+# patches/ too: the lockfile names a patched dependency, and fetch refuses
+# to run without its patch file.
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 # --ignore-scripts: simple-git-hooks' postinstall walks up for a package.json this
 # stage has deliberately not copied, and crashes the fetch.
 RUN pnpm fetch --ignore-scripts

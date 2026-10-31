@@ -8,7 +8,10 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /repo
 
 FROM base AS fetch
+# patches/ too: the lockfile names a patched dependency, and fetch refuses
+# to run without its patch file.
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm fetch --ignore-scripts
 
 FROM fetch AS build
