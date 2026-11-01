@@ -17,6 +17,7 @@
  *      fails on a clean checkout. Only CI would see it otherwise.
  *   4b. render-check --self-test  — the rendering-matrix checker against built
  *      manifests: a checker that stops checking would pass every build.
+ *   4b'. bench-corpus --self-test — the search bench's corpus version moves with its content.
  *   4c. wait-for-api --self-test  — `pnpm dev` holds Next until the API answers;
  *      a wait that returns at once brings back the 500 on the first page.
  *   5. frozen lockfile           — CI installs with --frozen-lockfile, so a
@@ -72,6 +73,14 @@ const steps = [
     name: 'render-check (self-test)',
     cmd: 'node',
     args: ['scripts/render-check.mjs', '--self-test'],
+    required: true,
+  },
+  {
+    // The bench's corpus version is a hash of what it writes; this proves the
+    // hash moves when a seeded post or the document derivation does.
+    name: 'bench-corpus (self-test)',
+    cmd: 'node',
+    args: ['scripts/bench-corpus.mjs', '--self-test'],
     required: true,
   },
   {

@@ -24,18 +24,31 @@
  *   pnpm search:bench                      # builds @cms/search first
  *
  * Its database is its own: `<name>_bench`, created on first run and never
- * dropped. A database holding this corpus version is reused; one holding
- * anything else is refused, and you drop it yourself.
+ * dropped. The corpus version is a hash of every row it writes
+ * (scripts/bench-corpus.mjs), so a database loaded before a seeded post or
+ * the search-document derivation changed is refused, with the command to
+ * drop it, instead of being measured as if it held this corpus.
+ *
+ * Where the budget is judged: the CI runner (ubuntu-latest, the integration
+ * job), the one machine every run shares. The number is a property of the
+ * hardware as much as the query. On the dev laptop (i5-1135G7, `powersave`
+ * governor) an interleaved comparison of the same build measured every shape
+ * about 2x CI, the cheap ones too ("page" 27.6 ms against 13.6 ms), at a
+ * load of 1.4 to 2 on 8 cores, so a local p95 near 55 ms is that machine,
+ * not load and not the query: CI measured p95 25.5 ms on the same commit.
+ * The report records the CPU model so two runs can be compared honestly.
  *
  * 0 = within budget. 1 = over budget, or the GIN index is not usable.
  * 2 = could not run.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { cpus, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { LIVE, authorEmail, corpus, corpusVersion, versionOfEmail } from './bench-corpus.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -45,13 +58,9 @@ const { searchPublished } = require(join(ROOT, 'services/search/dist/index.js'))
 const { SEARCH_VECTOR_INDEX } = require(join(ROOT, 'packages/db/dist/constraints.js'));
 
 const BUDGET_P95_MS = 50;
-const LIVE = 2000;
-const DRAFTS = 500;
 const PAGE = 10;
 const WARMUP = 3;
 const REPEATS = 10;
-const CORPUS_VERSION = 'v1';
-const AUTHOR_EMAIL = `bench-${CORPUS_VERSION}@cms.test`;
 
 // --- The database ------------------------------------------------------------
 
@@ -65,6 +74,19 @@ const name = url.pathname.slice(1);
 const benchName = name.endsWith('_bench') ? name : `${name}_bench`;
 url.pathname = `/${benchName}`;
 const BENCH_URL = url.toString();
+
+/**
+ * Where to run the drop from, as psql takes it: the maintenance database, no
+ * password (it would land in a terminal or a CI log), and no Prisma-only
+ * query parameters such as `schema`, which libpq rejects.
+ */
+function adminTarget() {
+  const target = new URL(BENCH_URL);
+  target.password = '';
+  target.pathname = '/postgres';
+  target.search = '';
+  return target.toString();
+}
 
 async function ensureDatabase() {
   const adminUrl = new URL(BENCH_URL);
@@ -86,100 +108,12 @@ async function ensureDatabase() {
   });
 }
 
-// --- The corpus --------------------------------------------------------------
+// --- The corpus (scripts/bench-corpus.mjs) ------------------------------------
 
-/** mulberry32: small, fast, and the same sequence on every machine. */
-function prng(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** The seeded posts' words, most frequent first (ties alphabetical), for a Zipf draw. */
-function vocabulary() {
-  const dir = join(ROOT, 'packages/db/prisma/content/posts');
-  const counts = new Map();
-  for (const file of readdirSync(dir).sort()) {
-    for (const word of readFileSync(join(dir, file), 'utf8')
-      .toLowerCase()
-      .match(/[a-z]{3,}/gu) ?? []) {
-      counts.set(word, (counts.get(word) ?? 0) + 1);
-    }
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
-    .map(([w]) => w);
-}
-
-function zipf(words, random, s = 1.07) {
-  const cumulative = [];
-  let sum = 0;
-  for (let rank = 1; rank <= words.length; rank += 1) {
-    sum += 1 / rank ** s;
-    cumulative.push(sum);
-  }
-  return () => {
-    const target = random() * sum;
-    let lo = 0;
-    let hi = cumulative.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (cumulative[mid] < target) lo = mid + 1;
-      else hi = mid;
-    }
-    return words[lo];
-  };
-}
-
-function corpus() {
-  const random = prng(2026);
-  const words = vocabulary();
-  const word = zipf(words, random);
-  const between = (lo, hi) => lo + Math.floor(random() * (hi - lo + 1));
-  const phrase = (n) => Array.from({ length: n }, word).join(' ');
-  const sentenceText = (n) => {
-    const out = [];
-    while (n > 0) {
-      const len = Math.min(n, between(8, 22));
-      const s = phrase(len);
-      out.push(`${s[0].toUpperCase()}${s.slice(1)}.`);
-      n -= len;
-    }
-    return out.join(' ');
-  };
-  const revision = () => {
-    const title = phrase(between(4, 9));
-    return {
-      title: `${title[0].toUpperCase()}${title.slice(1)}`,
-      excerpt: sentenceText(between(18, 30)).slice(0, 300),
-      body: sentenceText(between(300, 2400)),
-    };
-  };
-  const day = 86_400_000;
-  const start = Date.UTC(2023, 0, 1);
-  const posts = [];
-  for (let i = 0; i < LIVE + DRAFTS; i += 1) {
-    const live = i < LIVE;
-    const at = new Date(start + Math.floor(random() * 1000) * day);
-    posts.push({
-      slug: `bench-${String(i).padStart(4, '0')}`,
-      live,
-      at,
-      revisions: live ? [revision(), revision()] : [revision()],
-    });
-  }
-  return { posts, words };
-}
-
-async function load(db, posts) {
+async function load(db, posts, email) {
   const author = await db.user.create({
     data: {
-      email: AUTHOR_EMAIL,
+      email,
       name: 'Bench author',
       role: 'AUTHOR',
       passwordHash: 'not-a-login',
@@ -299,19 +233,29 @@ async function main() {
   try {
     await db.$executeRawUnsafe('VACUUM ANALYZE search_documents');
     const { posts, words } = corpus();
-    const ours = await db.user.findUnique({ where: { email: AUTHOR_EMAIL } });
+    const version = corpusVersion(posts, searchDocument);
+    const email = authorEmail(version);
+    const ours = await db.user.findUnique({ where: { email } });
     const existing = await db.post.count();
     if (ours === null && existing > 0) {
+      // Say what it holds, so the refusal can be acted on without digging.
+      const others = await db.user.findMany({
+        where: { email: { startsWith: 'bench-' } },
+        select: { email: true },
+      });
+      const held = others.map((u) => versionOfEmail(u.email)).filter(Boolean);
       console.error(
-        `search-bench: ${benchName} holds data that is not corpus ${CORPUS_VERSION}. Drop it yourself and rerun.`,
+        `search-bench: ${benchName} holds corpus ${held.join(', ') || '(unknown)'}, and this script generates corpus ${version}.\n` +
+          `  The seeded posts or the search-document derivation changed since it was loaded. Drop it and rerun:\n` +
+          `  psql "${adminTarget()}" -c 'DROP DATABASE "${benchName}"'   (psql asks for the password)`,
       );
       return 2;
     }
-    if (ours === null) await load(db, posts);
+    if (ours === null) await load(db, posts, email);
     const liveCount = await db.post.count({ where: { publishedRevisionId: { not: null } } });
     const documents = await db.searchDocument.count();
     console.log(
-      `search-bench: ${benchName}, ${String(liveCount)} live posts, ${String(documents)} documents`,
+      `search-bench: ${benchName}, corpus ${version}, ${String(liveCount)} live posts, ${String(documents)} documents`,
     );
     if (liveCount !== LIVE) {
       console.error(
@@ -387,7 +331,18 @@ async function main() {
     writeFileSync(
       report,
       JSON.stringify(
-        { live: liveCount, documents, p50, p95, p99, budget: BUDGET_P95_MS, indexUsed, results },
+        {
+          corpus: version,
+          live: liveCount,
+          documents,
+          p50,
+          p95,
+          p99,
+          budget: BUDGET_P95_MS,
+          indexUsed,
+          machine: cpus()[0]?.model ?? 'unknown',
+          results,
+        },
         null,
         2,
       ),
