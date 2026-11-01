@@ -134,6 +134,12 @@ wait_for "${API_BASE_URL}/health" api "$API_PID" "$API_LOG"
 wait_for "${PUBLISHER_INTERNAL_URL}/health" publisher "$PUB_PID" "$PUB_LOG"
 
 echo "==> Building the site against the seeded API (production)"
+# The data cache from the previous build would answer the build's fetches with
+# what the API held then: a run killed before its cleanup left a published test
+# post, and the next build prerendered it from this cache although the reseeded
+# API no longer had it (render-check caught it: 37 post pages for 36 live posts).
+# The build must read THIS API, so it starts from an empty data cache.
+rm -rf apps/web/.next/cache/fetch-cache
 NODE_ENV=production pnpm exec turbo run build --filter=@cms/web >>"$LOG_DIR/build.log" 2>&1 || {
   tail -40 "$LOG_DIR/build.log" >&2
   exit 1

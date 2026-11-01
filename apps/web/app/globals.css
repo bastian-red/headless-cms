@@ -387,3 +387,451 @@ code,
   block-size: 1px;
   overflow: hidden;
 }
+
+/*
+ * The studio (data-surface="studio", build step 9): structure only, on the
+ * placeholder tokens. Operate mode: the standard controls its users know.
+ * Its identity arrives with the design step.
+ */
+.studio-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space);
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem var(--space);
+  border-block-end: 1px solid var(--border);
+}
+
+.studio-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.studio-nav,
+.studio-filter,
+.studio-links,
+.editor-tag-list,
+.queue,
+.patch {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.studio-nav,
+.studio-filter,
+.studio-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem var(--space);
+}
+
+.studio-nav a[aria-current='page'],
+.studio-filter a[aria-current='page'] {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.studio-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.studio-page {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: var(--space);
+}
+
+.studio-page-wide {
+  max-width: 96rem;
+}
+
+.studio-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem var(--space);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.studio-filter {
+  margin-block: var(--space);
+}
+
+.studio-slug {
+  display: block;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.studio-when {
+  font-size: 0.875rem;
+}
+
+.button {
+  display: inline-block;
+  text-decoration: none;
+  touch-action: manipulation;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.button[data-danger='true'] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.form-result:empty,
+.workflow-result:empty {
+  margin: 0;
+}
+
+.form-result,
+.workflow-result {
+  color: var(--ok);
+}
+
+/* The editor: fields and body on the left, publishing on the right. */
+.editor {
+  display: grid;
+  gap: var(--space);
+}
+
+.editor > * {
+  min-width: 0;
+}
+
+.editor-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem var(--space);
+  align-items: center;
+  padding-block: 0.5rem;
+  background: var(--bg);
+  border-block-end: 1px solid var(--border);
+}
+
+.editor-state {
+  margin: 0;
+  flex: 1 1 12rem;
+}
+
+.editor-shortcut {
+  font-size: 0.875rem;
+}
+
+.editor-title {
+  font-size: 1.25rem;
+}
+
+.field-label-row {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.field-count {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-count[data-over='true'] {
+  color: var(--danger);
+}
+
+.editor-split {
+  display: grid;
+  gap: var(--space);
+  margin-block-end: var(--space);
+}
+
+.editor-split > * {
+  min-width: 0;
+}
+
+.editor-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.editor-tabs [role='tab'] {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.editor-tabs [role='tab'][aria-selected='true'] {
+  font-weight: 700;
+  border-color: var(--accent);
+  border-block-end-width: 3px;
+}
+
+.editor-split[data-tab='write'] .editor-preview,
+.editor-split[data-tab='preview'] .editor-write {
+  display: none;
+}
+
+.editor-pane {
+  display: grid;
+  gap: 0.25rem;
+  align-content: start;
+}
+
+.editor-pane-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.editor-body {
+  font-family: var(--font-mono);
+  min-height: 24rem;
+  resize: vertical;
+}
+
+.editor-preview {
+  padding: var(--space);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.editor-preview-title {
+  margin-block: 0.5rem;
+}
+
+.editor-tags {
+  border: 1px solid var(--border);
+  padding: var(--space);
+}
+
+.editor-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem var(--space);
+}
+
+.editor-seo {
+  margin-block-end: var(--space);
+}
+
+.editor-seo summary {
+  cursor: pointer;
+  margin-block-end: 0.5rem;
+}
+
+.editor-form ::placeholder,
+.studio-page ::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.aside-title,
+.workflow-title {
+  margin-block-start: 0;
+  font-size: 1.125rem;
+}
+
+.workflow-actions,
+.stale-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+}
+
+.confirm {
+  margin-block-start: var(--space);
+  padding: var(--space);
+  border: 2px solid var(--danger);
+}
+
+.stale {
+  border-color: var(--danger);
+}
+
+.patch {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  overflow-x: auto;
+}
+
+.patch-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.patch-line[data-kind='added'] {
+  color: var(--ok);
+}
+
+.patch-line[data-kind='removed'] {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.patch-line[data-kind='hunk'] {
+  color: var(--muted);
+}
+
+.patch-sign {
+  display: inline-block;
+  width: 1.5ch;
+}
+
+/* History: what changed, with the change marked twice (colour and line). */
+.diff {
+  overflow-wrap: anywhere;
+}
+
+.diff-block {
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  max-width: none;
+}
+
+.diff ins {
+  color: var(--ok);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+}
+
+.diff del {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.diff-fold {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.diff-list dt {
+  font-weight: 700;
+  margin-block-start: var(--space);
+}
+
+.diff-list dd {
+  margin: 0;
+}
+
+.history tr[aria-current='true'] td {
+  font-weight: 700;
+}
+
+.queue-item {
+  margin-block: var(--space);
+}
+
+.queue-title {
+  margin-block: 0;
+  font-size: 1.125rem;
+}
+
+.queue-body p {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.role-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.role-form .form-result,
+.role-form .form-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.key-value {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.preview-banner {
+  margin: 0;
+  max-width: none;
+  padding: 0.5rem var(--space);
+  background: var(--surface);
+  border-block-end: 1px solid var(--border);
+}
+
+/* A table of records stacks into labelled rows on a phone instead of squeezing. */
+@media (max-width: 40rem) {
+  .studio-page .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .studio-page .table tr {
+    display: block;
+    padding-block: 0.5rem;
+    border-block-end: 1px solid var(--border);
+  }
+
+  .studio-page .table td {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 0.5rem;
+    border: 0;
+  }
+
+  .studio-page .table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+  }
+}
+
+@media (min-width: 64rem) {
+  .editor {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    align-items: start;
+  }
+
+  .editor-aside {
+    position: sticky;
+    top: 0;
+  }
+
+  .editor-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .editor-tabs {
+    display: none;
+  }
+
+  .editor-split[data-tab] .editor-preview,
+  .editor-split[data-tab] .editor-write {
+    display: grid;
+  }
+}
+
+/* The editor's save bar is sticky: a field scrolled into focus lands below it, not under it. */
+.editor-form :is(input, textarea, select, button, summary, .cm-content) {
+  scroll-margin-top: 5rem;
+}

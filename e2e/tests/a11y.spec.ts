@@ -8,7 +8,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page, TestInfo } from '@playwright/test';
 
-import { SEEDED, expect, signIn, test } from '../fixtures';
+import { SEEDED, expect, postIdOf, signIn, test } from '../fixtures';
 
 /** The public site's routes (build step 6); the author page is reached by its link. */
 const PUBLIC = [
@@ -87,8 +87,39 @@ for (const scheme of SCHEMES) {
     });
 
     test('studio', async ({ page }, testInfo) => {
-      await signIn(page);
+      await signIn(page, 'admin');
       await scan(page, testInfo, '/studio', scheme);
+      const id = await postIdOf(SEEDED.longForm);
+      for (const route of [
+        '/studio/posts/new',
+        `/studio/posts/${id}`,
+        `/studio/posts/${id}/preview`,
+        `/studio/posts/${id}/history`,
+        '/studio/comments',
+        '/studio/people',
+        '/studio/api-keys',
+      ]) {
+        await page.goto(route);
+        await page.waitForLoadState('load');
+        await scan(page, testInfo, route.replace(id, '[id]'), scheme);
+      }
+      // History with a comparison on screen: the diff marks are where contrast can fail.
+      await page.goto(`/studio/posts/${id}/history`);
+      await page
+        .getByRole('link', { name: /^Compare revision/u })
+        .first()
+        .click();
+      await expect(page.getByRole('region', { name: /→ current/u })).toBeVisible();
+      await scan(page, testInfo, '/studio/posts/[id]/history?compare', scheme);
+    });
+
+    test('the editor at phone width, with the preview tab open', async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await signIn(page, 'editor');
+      await page.goto(`/studio/posts/${await postIdOf(SEEDED.longForm)}`);
+      await expect(page.locator('.cm-content')).toBeVisible();
+      await page.getByRole('tab', { name: 'Preview' }).click();
+      await scan(page, testInfo, '/studio/posts/[id] (preview tab)', scheme);
     });
   });
 }

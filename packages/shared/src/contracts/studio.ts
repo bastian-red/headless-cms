@@ -25,7 +25,15 @@ const optionalText = (max: number) =>
 export const revisionFieldsSchema = z.object({
   title: z.string().trim().min(1).max(LIMITS.title),
   excerpt: z.string().trim().max(LIMITS.excerpt).default(''),
-  body: z.string().max(LIMITS.body).default(''),
+  // LF only. A browser submits a textarea with CRLF line endings (the HTML
+  // form rule), so without this every body saved through a form differed
+  // from the same text in the editor, and an unchanged save wrote a revision.
+  // Normalised before the length check, so CRLF never counts double.
+  body: z
+    .string()
+    .default('')
+    .transform((body) => body.replace(/\r\n?/gu, '\n'))
+    .pipe(z.string().max(LIMITS.body)),
   seoTitle: optionalText(LIMITS.seoTitle),
   seoDescription: optionalText(LIMITS.seoDescription),
   tags: z

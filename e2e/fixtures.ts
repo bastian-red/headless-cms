@@ -10,7 +10,15 @@ import { join } from 'node:path';
 
 import type { SessionUser } from '@cms/shared';
 import { mintServiceToken } from '@cms/shared/server';
-import { expect, test as base, type APIRequestContext, type Page } from '@playwright/test';
+import { createPrismaClient } from '@cms/db';
+import {
+  expect,
+  test as base,
+  type APIRequestContext,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from '@playwright/test';
 
 const SEED = readFileSync(join(__dirname, '..', 'packages', 'db', 'prisma', 'seed.mts'), 'utf8');
 
@@ -185,4 +193,38 @@ export async function within(check: () => Promise<boolean>, what: string): Promi
     })
     .toBe(true);
   return Date.now() - started;
+}
+
+// --- the studio --------------------------------------------------------------
+
+/** A seeded post's id, read from the database: studio URLs carry ids, not slugs. */
+export async function postIdOf(slug: string): Promise<string> {
+  const db = createPrismaClient();
+  try {
+    const post = await db.post.findUnique({ where: { slug }, select: { id: true } });
+    if (post === null) throw new Error(`No seeded post with the slug ${slug}.`);
+    return post.id;
+  } finally {
+    await db.$disconnect();
+  }
+}
+
+/**
+ * A second (or third) person in their own browser context: their own cookies,
+ * their own address, and the same uncaught-error gate as the `page` fixture.
+ */
+export async function personPage(
+  browser: Browser,
+  who: Person,
+  options: { javaScriptEnabled?: boolean } = {},
+): Promise<{ page: Page; context: BrowserContext; errors: string[] }> {
+  const context = await browser.newContext({
+    extraHTTPHeaders: { 'x-forwarded-for': randomAddress() },
+    ...options,
+  });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await signIn(page, who);
+  return { page, context, errors };
 }

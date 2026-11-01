@@ -251,6 +251,49 @@ const PROOFS = [
     to: 'ts_rank_cd(d.vector, q.query, 1) AS rank',
     suite: ['bench'],
   },
+  // --- studio (step 9) ---------------------------------------------------
+  {
+    name: 'studio schedules a wall-clock time the clocks skip',
+    file: 'apps/web/lib/studio/schedule-time.ts',
+    from: 'if (isoToLocalInput(iso) !== value) {',
+    to: 'if (false) {',
+    suite: ['unit', '@cms/web'],
+  },
+  {
+    name: 'studio counts reordered tags as an unsaved change',
+    file: 'apps/web/lib/studio/post-values.ts',
+    from: 'return a.tags.length === b.tags.length && b.tags.every((tag) => tags.has(tag));',
+    to: 'return a.tags.join() === b.tags.join() && tags.size >= 0;',
+    suite: ['unit', '@cms/web'],
+  },
+  {
+    name: 'studio takes a post down without asking',
+    file: 'apps/web/lib/studio/workflow-ui.ts',
+    from: '    primary: false,\n    confirm:\n',
+    to: '    primary: false,\n    _confirm:\n',
+    suite: ['unit', '@cms/web'],
+  },
+  {
+    name: 'studio history shows a long body whole instead of the change',
+    file: 'apps/web/lib/studio/revision-diff.ts',
+    from: 'parts: foldUnchanged(parts(diffLines(from.body, to.body))),',
+    to: 'parts: parts(diffLines(from.body, to.body)),',
+    suite: ['unit', '@cms/web'],
+  },
+  {
+    name: 'studio formats a time with dateStyle and a zone name (V8 throws)',
+    file: 'apps/web/lib/studio/when.ts',
+    from: "  year: 'numeric',\n  month: 'short',\n  day: 'numeric',\n  hour: 'numeric',\n  minute: '2-digit',\n",
+    to: "  dateStyle: 'medium',\n  timeStyle: 'short',\n",
+    suite: ['unit', '@cms/web'],
+  },
+  {
+    name: 'studio stores a form-posted body with CRLF line endings',
+    file: 'packages/shared/src/contracts/studio.ts',
+    from: ".transform((body) => body.replace(/\\r\\n?/gu, '\\n'))",
+    to: '.transform((body) => body)',
+    suite: ['unit', '@cms/shared'],
+  },
 ];
 
 const filters = process.argv.slice(2);

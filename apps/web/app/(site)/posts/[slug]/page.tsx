@@ -1,9 +1,9 @@
 import { render } from '@cms/markdown';
-import { toReact } from '@cms/markdown/react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, permanentRedirect } from 'next/navigation';
 
+import { ArticleBody } from '../../../../components/article-body';
 import { CommentForm } from '../../../../components/comment-form';
 import { Comments } from '../../../../components/comments';
 import { JsonLd } from '../../../../components/json-ld';
@@ -135,21 +135,7 @@ export default async function PostPage({ params }: Props) {
             ) : null}
           </p>
         </header>
-        {rendered.outline.length >= 3 ? (
-          <nav aria-label="In this post" className="post-outline">
-            <h2 className="post-outline-title">In this post</h2>
-            <ol role="list">
-              {rendered.outline
-                .filter((entry) => entry.depth === 2)
-                .map((entry) => (
-                  <li key={entry.id}>
-                    <a href={`#${entry.id}`}>{entry.text}</a>
-                  </li>
-                ))}
-            </ol>
-          </nav>
-        ) : null}
-        <div className="prose">{toReact(rendered.tree)}</div>
+        <ArticleBody rendered={rendered} />
       </article>
       <section className="comments" aria-labelledby="comments-title">
         <Comments comments={comments} />

@@ -8,17 +8,19 @@ revalidated by tag the moment a publish lands, with no rebuild. A versioned cont
 same published content to any other frontend, and the public site reads through it like any other
 client. Nothing unpublished may ever reach a page, a feed, a sitemap or a search result.
 
-> **Status: build step 8 of 11, comments.** Sign-in, the three roles, the publisher process,
+> **Status: build step 9 of 11, the studio.** Sign-in, the three roles, the publisher process,
 > health and status, every test lane and CI are in place, and so are the content schema, a seeded
 > demo publication of forty posts, the one sanitizing markdown renderer, the API (posts and
 > revisions with stale-save conflicts, the editorial workflow, content API v1 and API keys),
-> full-text search, and the public site: every post, tag and author page prerendered from the
-> content API, the feed, the sitemap, JSON-LD and a social card per post, and the publisher:
-> scheduled publishing and signed revalidation webhooks, so a publish reaches every cached page in
-> about a second and a half, and readers' comments: anonymous, moderated before anyone sees them,
-> and rendered inside the static post page. The studio editor (with the moderation queue's screen)
-> and the visual identity arrive in the following steps. This README is rewritten as each one lands (demo GIF included at the end);
-> nothing below describes a feature that is not in the code.
+> full-text search, the public site (every post, tag and author page prerendered from the content
+> API, the feed, the sitemap, JSON-LD and a social card per post), the publisher (scheduled
+> publishing and signed revalidation webhooks, so a publish reaches every cached page in about a
+> second and a half), readers' comments (moderated before anyone sees them, rendered inside the
+> static post page), and the studio: a CodeMirror editor with a live preview from the site's own
+> renderer, stale-save conflicts shown as a diff, revision history with restore, the workflow
+> buttons, the moderation queue, people and API keys. The visual identity arrives in the next
+> step. This README is rewritten as each one lands (demo GIF included at the end); nothing below
+> describes a feature that is not in the code.
 
 ```mermaid
 flowchart LR
@@ -329,6 +331,68 @@ editor approves it, and then it is part of the static post page, not something a
 - **Counted in words and in JSON-LD:** "No comments yet", "1 comment", "2 comments", and
   `commentCount` on the `BlogPosting`.
 
+## The studio
+
+`/studio`, behind sign-in, server-rendered per request. Every write is a server action, so every
+form works before JavaScript loads; the browser never calls the API, and the API checks the role
+from its own table on every call (hiding a link is a courtesy, not the boundary).
+
+| Route | Who | What it is for |
+|---|---|---|
+| `/studio` | everyone | Posts, newest change first, filtered by state through plain links; an author sees their own |
+| `/studio/posts/new` | everyone | A title is enough to start a draft |
+| `/studio/posts/[id]` | everyone | The editor (below) and the workflow buttons the API offers this role in this state |
+| `/studio/posts/[id]/history` | everyone | Every revision; compare any of them with the current one; restore (editors) |
+| `/studio/posts/[id]/preview` | everyone | The saved revision in the public article body, `noindex` |
+| `/studio/comments` | editor, admin | The moderation queue: waiting oldest first, then approved, rejected, spam |
+| `/studio/people` | admin | Add a person, change a role (the last admin cannot be demoted) |
+| `/studio/api-keys` | admin | Create a content API key (shown once), revoke one (asks first) |
+
+A page a role cannot use is a 404 for that role, the same answer the API gives.
+
+**The editor.**
+
+- **CodeMirror 6 over a real `<textarea>`.** The textarea is the form field; CodeMirror mounts beside
+  it once the page is interactive and writes every change back. Without JavaScript the same form
+  saves through the plain textarea (`studio.spec.ts` saves with JavaScript off). The bare
+  `codemirror` package and a 90-line hook, no React wrapper.
+- **The preview is the site's renderer.** `render()` and `toReact()` from `packages/markdown` run in
+  the browser on every edit and feed the same `ArticleBody` component the public post page uses,
+  so the preview cannot drift from what is published. Side by side from 64rem; Write and Preview
+  tabs on a phone.
+- **A save never overwrites somebody else's.** It names the revision it started from; if another
+  save landed first the API answers 409 with who saved, which fields they changed and a unified
+  diff of the body, and the editor shows it. The person chooses: save theirs on top of the newer
+  revision ("keep mine", an overwrite made by somebody who saw the diff) or discard theirs and
+  load it. The base moves only on their own save or that choice, never because the page refreshed
+  behind them.
+- **Unsaved work is visible and guarded**: a status line ("Unsaved changes" / "Saved as revision
+  4"), a warning before leaving, Ctrl/Cmd+S, and workflow buttons that wait for the save, because a
+  transition acts on the saved revision.
+- **Counters** on every length-limited field, from the same `LIMITS` the API validates with.
+- **Scheduling in the editor's own time zone.** The `datetime-local` value is converted to an
+  instant in the browser (the server does not know the zone) and the label names the zone.
+  Without JavaScript the label says UTC, which is what the server reads. A wall-clock time the
+  clocks skip (Chile, 2026-09-06 00:30) is refused instead of silently published an hour late.
+- **Taking a post down asks first, in words**, with a way back ("Keep it published"); the question
+  is a server round trip, so it holds without JavaScript too. Revoking an API key works the same way.
+
+**History.** Any revision compares with the current one field by field (jsdiff: words for one-line
+fields, lines for the body, tags as a set), with additions and removals marked by colour, by
+underline or strike-through, and by words for a screen reader. A long unchanged body folds to the
+change and two lines of context. Restoring writes a new revision; nothing is ever deleted.
+
+Three editor bugs the E2E lane found, each now held by a test that was run red against the bug:
+a browser posts a textarea with CRLF line endings, so every form-saved body differed from the same
+text in the editor until the contract stored LF (`studio.test.ts`); pushing every React value back
+into CodeMirror lost keystrokes in Firefox ("First hand" saved as "Fisthad"), so only an explicit
+outside change replaces the document (`studio.spec.ts`, stale-save test, Firefox); and "load
+theirs" cleared its flag before the refresh it started had landed, leaving the newer revision
+unloaded (same test, Chromium).
+
+Times in the studio render in UTC, labelled, on the server and in the viewer's zone once the page
+has loaded: never a bare time a reader has to guess the zone of.
+
 ## Publishing: from a button to every cached page
 
 ```mermaid
@@ -420,13 +484,13 @@ the API listens after about 12 s, and a page opened in between was a 500.
 
 | Lane                 | Command                       | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | -------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate (every commit)  | `pnpm test`                   | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML`; the SEO builders (descriptions, JSON-LD escaping, RSS well-formed whatever a post says, RFC 822 dates, `dateModified` never before `datePublished`); every public route on one revalidate window, none reading the request, none dropping the feed link; webhook signatures (replay window, forged body, other secret) and the revalidate route touching nothing it did not verify; the publisher's backoff and signed delivery                                                                                                                                            |
+| Gate (every commit)  | `pnpm test`                   | The markdown renderer against 46 hostile vectors, a property test and the whole seeded publication, with the page and feed outputs identical; contracts, role matrix, the workflow table against every state the database allows, stale-save diffs, cursors, ETags, service tokens (incl. the `alg: none` forgery), config parsing, error mapping, throttler scoping, contrast of every colour pair in both schemes, no dangling CSS tokens, no `innerHTML`; the SEO builders (descriptions, JSON-LD escaping, RSS well-formed whatever a post says, RFC 822 dates, `dateModified` never before `datePublished`); every public route on one revalidate window, none reading the request, none dropping the feed link; webhook signatures (replay window, forged body, other secret) and the revalidate route touching nothing it did not verify; the publisher's backoff and signed delivery; the studio's helpers: schedule times round-tripped in three zones with the daylight-saving gap refused, studio times naming their zone, field diffs and the body fold, the stale-save patch, unsaved-change detection (tag order and trimmed spaces are not edits), workflow and moderation wording, CRLF bodies stored as LF                                                                                                                                            |
 | Environment contract | `pnpm env:contract`           | Source, `.env.example` and `turbo.json` agree in all four directions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Seed check           | `./scripts/seed-check.sh`     | The seed is deterministic and idempotent (two runs, one digest), every workflow state exists, no canary word is in a public row or a live search document, one live search document per live post, every internal link in a live post resolves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Integration          | `./scripts/integration.sh`    | Every content-model constraint and trigger refusing its forbidden write by name (including a two-transaction race) and the search documents' `live` flag following every publish, then the search query on the seeded corpus (title tier, no draft or canary findable, query syntax, every snippet path, cursor crawl), then the seeded newsroom behind the real Nest graph on Postgres and Redis at the documented budgets: sign-in and the default-closed guard; every studio route against every role (403 exactly where the role table says no, before the body is read); the five-way stale-save race; the render deadline; every workflow transition and its outbox row; the content API's pagination, filters, ETags, 308/410/404 and a canary crawl of every response; the OpenAPI document matching the router; the last-admin race; API key revocation; the comments: pending on submit with only a keyed address hash stored, the honeypot answered like a comment and stored nowhere, no comments on a post readers cannot see, 10 a minute per address and that budget limiting nothing else, approved-only reads page by page, the moderation queue and its same-source counts, events exactly when readers see a difference, the stale decision and two editors racing; then the publisher: due vs future schedules, two publishers racing for twelve due posts (each published once, one event each), signed delivery to a real HTTP server, backoff and the 5 min cap, the lease, three publishers draining 45 events (each delivered once) |
 | Search bench         | `pnpm search:bench`           | p95 < 50 ms over 2,000 published posts and 4,500 documents, 25 query shapes, through the exact function `/v1/search` calls; the GIN index used by a selective query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Red proofs           | `node scripts/red-proofs.mjs` | Breaks each guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags; for the publisher the comment honeypot, the moderator's `from` check, the decision's revalidation event, the approved-only read, the comment budget, the hashed limiter key; the scheduled-publish lock, the outbox lock and lease, the backoff cap, a redirect as delivery, the replay window and the route's signature check; for search the title tier, both draft defenses, the exclusion rule, the snippet window's check, the cursor binding, control-character stripping, and the first design's ranking against the bench), runs the suite that claims it, and fails unless that suite goes red                                                                                                                                                                                                                                                                                                                                                                               |
-| E2E                  | `./scripts/e2e.sh`            | Production build against the seeded API, the rendering matrix and its content (36 posts prerendered, no canary anywhere in `.next/`), Chromium and Firefox: every sitemap page (200, unique title and description, self canonical, feed link, JSON-LD), the post's JSON-LD and 1200×630 card, 308 with one `Location` and 404s, the feed against the API, robots, search (noindex, marks, paging), sign-in per role, deep links, open-redirect refusal, publish, edit and unpublish reaching the cached page, archive, feed and sitemap within 5 s, the unsigned webhook refused, the approved comments on the page and nothing pending, a reader's comment through the form (with and without JavaScript) waiting, then approved onto and refused off the cached page within 5 s, a refusal that keeps the typed text, the honeypot stored nowhere, health and status, axe (zero violations, both schemes), no sideways scroll at 390 px                                                                                                                                                                                                                                                                                                                     |
+| Red proofs           | `node scripts/red-proofs.mjs` | Breaks each guarantee in the source (the row lock, the head check, the excerpt rule, the outbox row, key revocation, the fresh role, the last-admin lock, the published-only query, tag order, weak ETags; for the publisher the comment honeypot, the moderator's `from` check, the decision's revalidation event, the approved-only read, the comment budget, the hashed limiter key; the scheduled-publish lock, the outbox lock and lease, the backoff cap, a redirect as delivery, the replay window and the route's signature check; for search the title tier, both draft defenses, the exclusion rule, the snippet window's check, the cursor binding, control-character stripping, and the first design's ranking against the bench; for the studio the daylight-saving refusal, tag-order dirtiness, the take-down question, the body fold, the zone-named time format, and CRLF normalisation), runs the suite that claims it, and fails unless that suite goes red                                                                                                                                                                                                                                                                                                                                                                               |
+| E2E                  | `./scripts/e2e.sh`            | Production build against the seeded API, the rendering matrix and its content (36 posts prerendered, no canary anywhere in `.next/`), Chromium and Firefox: every sitemap page (200, unique title and description, self canonical, feed link, JSON-LD), the post's JSON-LD and 1200×630 card, 308 with one `Location` and 404s, the feed against the API, robots, search (noindex, marks, paging), sign-in per role, deep links, open-redirect refusal, publish, edit and unpublish reaching the cached page, archive, feed and sitemap within 5 s, the unsigned webhook refused, the approved comments on the page and nothing pending, a reader's comment through the form (with and without JavaScript) waiting, then approved onto and refused off the cached page within 5 s, a refusal that keeps the typed text, the honeypot stored nowhere, health and status; the studio through its UI: an author writing in CodeMirror with the preview following each keystroke, Ctrl+S, submit, an editor publishing onto the public page within 5 s and taking it down only after a second question, a stale save refused with the diff and both ways out (save mine on top, load theirs), history compare and restore, a post scheduled through the form going out on its own, a schedule too soon refused, a comment approved from the queue onto the page within 5 s, an API key shown once and revoked after a question, each role's pages (the rest are 404 for it), saving with JavaScript off; axe (zero violations, both schemes, every studio route included), no sideways scroll at 390 px on every studio route, and the editor side by side when wide, tabs on a phone                                                                                                                                                                                                                                                                                                                     |
 | Dev smoke            | `./scripts/dev-smoke.sh`      | The documented `pnpm dev` from a cold start, with every `.env` name stripped from its own environment, serves the archive on the very first request once the web port opens (no 500 while the API compiles), a studio that read the editor from Postgres and a public archive read through the content API with the site's key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 The pre-commit hook runs gitleaks, the environment contract, the invisible-character scan, the

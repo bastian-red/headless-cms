@@ -7,7 +7,7 @@
  */
 import type { Page } from '@playwright/test';
 
-import { SEEDED, expect, signIn, test } from '../fixtures';
+import { SEEDED, expect, postIdOf, signIn, test } from '../fixtures';
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -38,4 +38,40 @@ test('public routes do not scroll sideways at 390 px', async ({ page }) => {
 test('the studio does not scroll sideways at 390 px', async ({ page }) => {
   await signIn(page, 'admin');
   expect(await overflow(page)).toBeLessThanOrEqual(0);
+  const id = await postIdOf(SEEDED.longForm);
+  for (const path of [
+    '/studio/posts/new',
+    // The long read in the editor: CodeMirror's long lines and the preview's
+    // code blocks and tables are where a phone slides sideways.
+    `/studio/posts/${id}`,
+    `/studio/posts/${id}/preview`,
+    `/studio/posts/${id}/history`,
+    '/studio/comments',
+    '/studio/people',
+    '/studio/api-keys',
+  ]) {
+    await page.goto(path);
+    await page.waitForLoadState('load');
+    expect(await overflow(page), path).toBeLessThanOrEqual(0);
+  }
+  await page.goto(`/studio/posts/${id}`);
+  await page.getByRole('tab', { name: 'Preview' }).click();
+  await expect(page.getByTestId('preview')).toBeVisible();
+  expect(await overflow(page), 'editor, preview tab').toBeLessThanOrEqual(0);
+});
+
+test('the editor shows writing and preview side by side on a wide screen, as tabs on a phone', async ({
+  page,
+}) => {
+  await signIn(page, 'editor');
+  const id = await postIdOf(SEEDED.longForm);
+  await page.goto(`/studio/posts/${id}`);
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Write' })).toBeVisible();
+  await expect(page.getByTestId('preview')).toBeHidden();
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.getByRole('tab', { name: 'Write' })).toBeHidden();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await expect(page.getByTestId('preview')).toBeVisible();
 });

@@ -35,6 +35,21 @@ describe('revision fields', () => {
     expect(saveRevisionSchema.safeParse({ ...base, tags: many }).success).toBe(false);
   });
 
+  it('stores a body with LF line endings whatever the browser sent', () => {
+    // A form posts a textarea as CRLF; old Mac text uses a bare CR.
+    const saved = saveRevisionSchema.parse({
+      baseRevisionId: ID,
+      title: 'T',
+      body: 'a\r\n\r\nb\rc',
+    });
+    expect(saved.body).toBe('a\n\nb\nc');
+    // The limit counts the stored text, so CRLF does not count double.
+    const atLimit = 'x\r\n'.repeat(LIMITS.body / 2);
+    expect(
+      saveRevisionSchema.safeParse({ baseRevisionId: ID, title: 'T', body: atLimit }).success,
+    ).toBe(true);
+  });
+
   it('requires the base revision on a save', () => {
     expect(saveRevisionSchema.safeParse({ title: 'T' }).success).toBe(false);
   });
