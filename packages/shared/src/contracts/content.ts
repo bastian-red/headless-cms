@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { LIMITS } from '../constants';
+
 /**
  * The content vocabulary: post and comment states, the slug format, and every
  * length limit.
@@ -56,23 +58,7 @@ export function readingMinutes(words: number): number {
   return Math.max(1, Math.round(words / WORDS_PER_MINUTE));
 }
 
-/**
- * Every length limit, in characters. The SEO pair follows what search results
- * show before truncating (about 60-70 and 155-160), so a limit here is a
- * promise the snippet will not be cut mid-word by the engine.
- */
-export const LIMITS = Object.freeze({
-  slug: 96,
-  title: 160,
-  excerpt: 300,
-  body: 200_000,
-  seoTitle: 70,
-  seoDescription: 160,
-  tagName: 40,
-  commentName: 80,
-  commentBody: 2_000,
-  mediaAlt: 300,
-});
+export { LIMITS } from '../constants';
 
 /**
  * Lowercase words joined by single hyphens: `rendering-at-the-edge`. No leading

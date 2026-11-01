@@ -12,3 +12,4 @@ docs
 .env.*
 !.env.example
 **/demo-shots
+assets

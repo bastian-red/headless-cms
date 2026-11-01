@@ -1,6 +1,6 @@
 'use client';
 
-import { COMMENT_HONEYPOT_FIELD, LIMITS } from '@cms/shared';
+import { COMMENT_HONEYPOT_FIELD, LIMITS } from '@cms/shared/constants';
 import { useActionState, useId } from 'react';
 
 import type { CommentFormState } from '../lib/comment-action';

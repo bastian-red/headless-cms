@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { MAX_TAGS_PER_REVISION } from '../constants';
+
 import { LIMITS, postStatusSchema, slugSchema } from './content';
 import { emailSchema, idSchema, instantSchema, nameSchema, passwordSchema } from './primitives';
 import { roleSchema } from './roles';
@@ -11,7 +13,7 @@ import { transitionNameSchema } from './workflow';
  */
 
 /** A revision carries at most this many tags. A tag page is a facet, not a keyword list. */
-export const MAX_TAGS_PER_REVISION = 8;
+export { MAX_TAGS_PER_REVISION };
 
 /** An optional text field: blank means "not set", stored as null, never as ''. */
 const optionalText = (max: number) =>
@@ -77,8 +79,7 @@ export const transitionSchema = z.discriminatedUnion('action', [
 ]);
 export type TransitionInput = z.infer<typeof transitionSchema>;
 
-/** A schedule must be at least this far ahead, so it cannot fire before the editor's request returns. */
-export const MIN_SCHEDULE_LEAD_MS = 60_000;
+export { MIN_SCHEDULE_LEAD_MS } from '../constants';
 
 export const personSchema = z.object({ id: idSchema, name: nameSchema });
 

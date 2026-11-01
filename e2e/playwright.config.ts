@@ -20,6 +20,8 @@ const WEB_PORT = process.env.WEB_PORT ?? '3000';
 
 export default defineConfig({
   testDir: './tests',
+  // The README demo (tests/demo.spec.ts) only runs under scripts/demo-gif.sh.
+  testIgnore: process.env.DEMO === '1' ? [] : ['**/demo.spec.ts'],
   forbidOnly: Boolean(process.env.CI),
   fullyParallel: false,
   workers: 1,

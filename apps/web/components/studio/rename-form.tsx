@@ -1,6 +1,6 @@
 'use client';
 
-import { LIMITS } from '@cms/shared';
+import { LIMITS } from '@cms/shared/constants';
 import { useActionState, useId } from 'react';
 
 import { renamePost, type SimpleState } from '../../app/studio/actions';

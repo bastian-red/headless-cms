@@ -3,7 +3,8 @@
  * A glyph and a word for each state; the buttons offered are every decision
  * except the state the comment is already in.
  */
-import { DECISIONS, type CommentStatus, type Decision } from '@cms/shared';
+import type { CommentStatus, Decision } from '@cms/shared';
+import { DECISIONS } from '@cms/shared/constants';
 
 export const COMMENT_STATUS_UI: Readonly<Record<CommentStatus, { glyph: string; word: string }>> = {
   PENDING: { glyph: '◔', word: 'Waiting' },

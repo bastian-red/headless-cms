@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { COMMENT_HONEYPOT_FIELD, DECISIONS } from '../constants';
+
 import { commentStatusSchema, LIMITS, slugSchema, type CommentStatus } from './content';
 import { idSchema, instantSchema } from './primitives';
 
@@ -13,12 +15,7 @@ import { idSchema, instantSchema } from './primitives';
  * link, an image or a script, and needs no sanitizer to be safe.
  */
 
-/**
- * The honeypot: a field a person never sees and a form-filling bot fills. A
- * submission with it set is answered exactly like a real one (so the bot learns
- * nothing) and stored nowhere.
- */
-export const COMMENT_HONEYPOT_FIELD = 'website';
+export { COMMENT_HONEYPOT_FIELD } from '../constants';
 
 /* eslint-disable no-control-regex -- stripping control characters is the point */
 const CONTROL =
@@ -105,8 +102,7 @@ export type V1CommentQuery = z.infer<typeof v1CommentQuerySchema>;
 
 // --- moderation (studio) ----------------------------------------------------
 
-/** What a moderator can decide. A comment never goes back to PENDING. */
-export const DECISIONS = ['APPROVED', 'REJECTED', 'SPAM'] as const;
+export { DECISIONS };
 export const decisionSchema = z.enum(DECISIONS);
 export type Decision = z.infer<typeof decisionSchema>;
 

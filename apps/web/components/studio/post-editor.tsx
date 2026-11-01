@@ -1,7 +1,8 @@
 'use client';
 
 import { render } from '@cms/markdown';
-import { LIMITS, MAX_TAGS_PER_REVISION, type StudioPost } from '@cms/shared';
+import type { StudioPost } from '@cms/shared';
+import { LIMITS, MAX_TAGS_PER_REVISION } from '@cms/shared/constants';
 import { useRouter } from 'next/navigation';
 import {
   useActionState,

@@ -157,5 +157,14 @@ echo "==> Starting web"
 WEB_PID=$!
 wait_for "${APP_BASE_URL}/sign-in" web "$WEB_PID" "$WEB_LOG"
 
+# Lighthouse first, while the server is idle and nothing has been written yet:
+# the budgets (e2e/lighthouse-budget.mjs) are timing measurements, and the
+# specs below sign in, publish and comment. LIGHTHOUSE=0 skips it for a quick
+# local loop; CI never sets it. The demo recording has no use for it.
+if [[ "${LIGHTHOUSE:-1}" != "0" && "${DEMO:-0}" != "1" ]]; then
+  echo "==> Running Lighthouse (reports in ${LOG_DIR}/lighthouse)"
+  LOG_DIR="$LOG_DIR" pnpm --filter @cms/e2e exec node lighthouse.mjs "$APP_BASE_URL"
+fi
+
 echo "==> Running Playwright"
 pnpm --filter @cms/e2e exec playwright test "$@"

@@ -166,7 +166,7 @@ jobs:
           retention-days: 7
 
   e2e:
-    name: E2E (Playwright, Chromium + Firefox, axe in both schemes, 390 px)
+    name: E2E (Lighthouse budgets, Playwright on Chromium + Firefox, axe in both schemes, 390 px)
     runs-on: ubuntu-24.04
     services:
       postgres: *postgres
@@ -184,6 +184,13 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm --filter @cms/e2e exec playwright install --with-deps chromium firefox
       - run: ./scripts/e2e.sh
+      # Every run, pass or fail: the median-run report is how a score is read.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse
+          path: /tmp/cms-e2e/lighthouse
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

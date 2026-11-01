@@ -1,6 +1,6 @@
 'use client';
 
-import { LIMITS } from '@cms/shared';
+import { LIMITS } from '@cms/shared/constants';
 import { useActionState, useRef } from 'react';
 
 import { createPost, type CreatePostState } from '../../app/studio/actions';

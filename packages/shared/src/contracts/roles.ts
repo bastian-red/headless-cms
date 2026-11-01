@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ROLES } from '../constants';
+
 /**
  * Roles and what each may do, as DATA.
  *
@@ -22,7 +24,7 @@ import { z } from 'zod';
  * row needs no translation and a typo cannot compile in one place and not the
  * other.
  */
-export const ROLES = ['AUTHOR', 'EDITOR', 'ADMIN'] as const;
+export { ROLES };
 export const roleSchema = z.enum(ROLES);
 export type Role = z.infer<typeof roleSchema>;
 

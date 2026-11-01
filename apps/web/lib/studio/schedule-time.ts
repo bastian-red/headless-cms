@@ -7,7 +7,7 @@
  * not ours. These functions only reject what the input cannot mean and
  * format the way back.
  */
-import { MIN_SCHEDULE_LEAD_MS } from '@cms/shared';
+import { MIN_SCHEDULE_LEAD_MS } from '@cms/shared/constants';
 
 const LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u;
 

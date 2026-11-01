@@ -1,6 +1,7 @@
 'use client';
 
-import { ROLES, type Role } from '@cms/shared';
+import type { Role } from '@cms/shared';
+import { ROLES } from '@cms/shared/constants';
 import { useActionState, useId, useRef } from 'react';
 
 import {
