@@ -144,6 +144,66 @@ describe('GET /v1/posts', () => {
     expect(hers.items.every((p) => p.author.id === mara.id)).toBe(true);
   });
 
+  it('gives every summary the same words and minutes as its page', async () => {
+    const { items } = await crawl();
+    for (const item of items) {
+      const post = v1PostSchema.parse((await get(`/v1/posts/${item.slug}`)).body);
+      expect([item.words, item.readingMinutes], item.slug).toEqual([
+        post.words,
+        post.readingMinutes,
+      ]);
+    }
+    // The seed stores the count on every revision, so the list renders nothing.
+    expect(await h.db.revision.count({ where: { words: null } })).toBe(0);
+  });
+
+  it("stores the renderer's count on a save and serves it on the list", async () => {
+    const author = await newUser(h.db, 'words-author');
+    const editor = await newUser(h.db, 'words-editor', 'EDITOR');
+    // Computed with @cms/markdown's render(): 465 words (the heading, 460
+    // words of prose and the code block), 2 minutes at 230 a minute.
+    const body = `## Counted\n\n${Array.from({ length: 460 }, (_, i) => `w${String(i)}`).join(' ')}.\n\n\`\`\`js\nconst notProse = 1;\n\`\`\``;
+    const post = await newPost(h, author, { body });
+    expect(
+      (await h.db.revision.findUniqueOrThrow({ where: { id: post.headRevisionId } })).words,
+    ).toBe(465);
+    await transition(h, editor, post, 'publish');
+    const listed = (await crawl(`?author=${author.id}`)).items;
+    expect(listed.map((p) => [p.slug, p.words, p.readingMinutes])).toEqual([[post.slug, 465, 2]]);
+  });
+
+  it('counts a revision written before the column existed by rendering it', async () => {
+    const author = await newUser(h.db, 'legacy-author');
+    const post = await newPost(h, author);
+    // As a row from before 20261031140000: no words. Written straight to the
+    // database, which is what a pre-migration API did.
+    const legacy = await h.db.revision.create({
+      data: {
+        postId: post.id,
+        number: 2,
+        parentRevisionId: post.headRevisionId,
+        authorId: author.id,
+        title: 'Legacy',
+        excerpt: 'Old.',
+        body: '## Hello\n\nA body.',
+      },
+    });
+    expect(legacy.words).toBeNull();
+    const at = new Date();
+    await h.db.post.update({
+      where: { id: post.id },
+      data: {
+        headRevisionId: legacy.id,
+        publishedRevisionId: legacy.id,
+        status: 'PUBLISHED',
+        publishedAt: at,
+      },
+    });
+    const listed = (await crawl(`?author=${author.id}`)).items;
+    // render('## Hello\n\nA body.').words, run: 3.
+    expect(listed.map((p) => [p.words, p.readingMinutes])).toEqual([[3, 1]]);
+  });
+
   it('refuses a cursor it did not issue (400)', async () => {
     const r = await get('/v1/posts?cursor=bm90LWEtY3Vyc29y');
     expect(r.status).toBe(400);

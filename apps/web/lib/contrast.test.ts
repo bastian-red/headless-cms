@@ -3,8 +3,9 @@
  * from the real stylesheet. Never from a copy of the palette: a table of hexes
  * in TypeScript would pass forever while the CSS said something else.
  *
- * The palette is the scaffold's colourless placeholder until the design step;
- * this gate holds whatever is there, so the real identity lands under it.
+ * The palette is the type specimen's (docs/DESIGN.md): two schemes, one
+ * palette for the site and the studio. --rule is every hairline and control
+ * edge, so it is held to 3:1 like a control border.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,7 +56,7 @@ describe('text clears AA everywhere it is painted', () => {
 
 describe('control edges and the focus ring clear 3:1', () => {
   for (const [name, palette] of Object.entries(SCHEMES)) {
-    for (const mark of ['--border', '--accent'] as const) {
+    for (const mark of ['--rule', '--accent'] as const) {
       for (const background of BACKGROUNDS) {
         it(`${name}: ${mark} on ${background}`, () => {
           expect(
@@ -65,6 +66,19 @@ describe('control edges and the focus ring clear 3:1', () => {
       }
     }
   }
+});
+
+describe('a link in running text needs its underline', () => {
+  for (const [name, palette] of Object.entries(SCHEMES)) {
+    it(`${name}: --accent against --text is under 3:1, so globals.css underlines links`, () => {
+      // If this ever clears 3:1, colour alone could mark a link (WCAG 1.4.1
+      // via axe's link-in-text-block); until then the underline is required.
+      expect(ratio(resolve(palette, '--accent'), resolve(palette, '--text'))).toBeLessThan(3);
+    });
+  }
+  it('underlines every link by default', () => {
+    expect(css).toMatch(/\ba\s*\{[^}]*text-decoration-line:\s*underline/u);
+  });
 });
 
 describe('colour is never the only channel', () => {

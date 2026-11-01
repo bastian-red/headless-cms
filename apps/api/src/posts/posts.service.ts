@@ -70,6 +70,12 @@ import {
   type RevisionRow,
 } from './views';
 
+/** What a passing render check hands a revision write. */
+interface Rendered {
+  readonly text: string;
+  readonly words: number;
+}
+
 type Tx = Prisma.TransactionClient;
 
 /** The post row as the lock returns it. */
@@ -182,7 +188,7 @@ export class PostsService {
     if (slug === null) {
       throw new DomainError('UNPROCESSABLE', 'That title makes no slug; give the post one.');
     }
-    const text = await this.assertRenders(input.body);
+    const rendered = await this.assertRenders(input.body);
 
     const id = await this.write(async (tx) => {
       const tagIds = await resolveTags(tx, input.tags);
@@ -196,11 +202,14 @@ export class PostsService {
           number: 1,
           authorId: actor.id,
           ...fieldsOf(input),
+          words: rendered.words,
           tags: tagLinks(tagIds),
         },
         select: { id: true },
       });
-      await tx.searchDocument.create({ data: searchDocument(revision.id, { ...input, text }) });
+      await tx.searchDocument.create({
+        data: searchDocument(revision.id, { ...input, text: rendered.text }),
+      });
       await tx.post.update({ where: { id: post.id }, data: { headRevisionId: revision.id } });
       return post.id;
     });
@@ -210,8 +219,8 @@ export class PostsService {
   async save(actor: ActorRecord, id: string, input: SaveRevisionInput): Promise<SaveResult> {
     // Visible at all, before spending a render on it.
     await this.visible(this.prisma.client, actor, id);
-    const text = await this.assertRenders(input.body);
-    return this.writeRevision(actor, id, input.baseRevisionId, input, text, null);
+    const rendered = await this.assertRenders(input.body);
+    return this.writeRevision(actor, id, input.baseRevisionId, input, rendered, null);
   }
 
   async restore(
@@ -227,8 +236,8 @@ export class PostsService {
     });
     if (source === null) throw new DomainError('NOT_FOUND', 'There is no such revision.');
     const fields: RevisionFields = { ...comparable(source) };
-    const text = await this.assertRenders(fields.body);
-    return this.writeRevision(actor, id, baseRevisionId, fields, text, source.id);
+    const rendered = await this.assertRenders(fields.body);
+    return this.writeRevision(actor, id, baseRevisionId, fields, rendered, source.id);
   }
 
   async rename(actor: ActorRecord, id: string, slug: string): Promise<StudioPost> {
@@ -338,8 +347,8 @@ export class PostsService {
     id: string,
     baseRevisionId: string,
     fields: RevisionFields,
-    /** The body's reader-visible text, from the render check that passed it. */
-    text: string,
+    /** The body's reader-visible text and word count, from the render check that passed it. */
+    rendered: Rendered,
     restoredFromId: string | null,
   ): Promise<SaveResult> {
     const created = await this.write(async (tx) => {
@@ -374,13 +383,16 @@ export class PostsService {
           restoredFromId,
           authorId: actor.id,
           ...fieldsOf(fields),
+          words: rendered.words,
           tags: tagLinks(tagIds),
         },
         select: { id: true },
       });
       // In the same transaction: a revision never exists without the text
       // search will find it by once it is published.
-      await tx.searchDocument.create({ data: searchDocument(revision.id, { ...fields, text }) });
+      await tx.searchDocument.create({
+        data: searchDocument(revision.id, { ...fields, text: rendered.text }),
+      });
       const status = statusAfterSave(post.status);
       await tx.post.update({
         where: { id },
@@ -419,10 +431,10 @@ export class PostsService {
     );
   }
 
-  /** The body's reader-visible text, or a 422 if it does not render in time. */
-  private async assertRenders(body: string): Promise<string> {
+  /** The body's reader-visible text and words, or a 422 if it does not render in time. */
+  private async assertRenders(body: string): Promise<Rendered> {
     const result = await this.markdown.check(body);
-    if (result.ok) return result.text;
+    if (result.ok) return { text: result.text, words: result.words };
     throw new DomainError(
       'UNPROCESSABLE',
       result.reason === 'timeout'

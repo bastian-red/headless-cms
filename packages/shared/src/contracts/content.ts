@@ -43,6 +43,19 @@ export const COMMENT_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'SPAM'] as c
 export const commentStatusSchema = z.enum(COMMENT_STATUSES);
 export type CommentStatus = z.infer<typeof commentStatusSchema>;
 
+/** Reading speed for the reading time every surface shows: page, list, studio. */
+export const WORDS_PER_MINUTE = 230;
+
+/**
+ * Minutes to read `words` words, never less than one. One rule, here, because
+ * the renderer computes it from a body and the content API from the count
+ * stored on a revision, and a list that said 14 min beside a page that said
+ * 15 would be the product contradicting itself.
+ */
+export function readingMinutes(words: number): number {
+  return Math.max(1, Math.round(words / WORDS_PER_MINUTE));
+}
+
 /**
  * Every length limit, in characters. The SEO pair follows what search results
  * show before truncating (about 60-70 and 155-160), so a limit here is a

@@ -125,6 +125,11 @@ model Revision {
   excerpt          String
   /// Markdown source. Rendering is @cms/markdown's job, never stored HTML.
   body             String
+  /// Words a reader sees in the body, from the render check that passed it
+  /// (the same count the page and the specimen label show). Derived, but a
+  /// revision is immutable, so it never goes stale. Null on rows written
+  /// before 20261031140000; the content API renders those once instead.
+  words            Int?
   seoTitle         String?  @map("seo_title")
   seoDescription   String?  @map("seo_description")
   coverMediaId     String?  @map("cover_media_id")

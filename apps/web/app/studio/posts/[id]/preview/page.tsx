@@ -32,17 +32,20 @@ export default async function PreviewPage({ params }: Props) {
           : 'Readers do not see this yet.'}{' '}
         <Link href={`/studio/posts/${post.id}`}>Back to the editor</Link>
       </p>
-      <main id="main" className="page">
+      <main id="main" className="page page-sheet">
         <article className="post">
-          <header className="post-header">
-            <h1>{post.head.title}</h1>
-            <p className="muted">
-              By {post.author.name} · {String(rendered.readingMinutes)} min read ·{' '}
-              {rendered.words.toLocaleString('en')} words
-            </p>
-            {post.head.excerpt === '' ? null : <p className="post-excerpt">{post.head.excerpt}</p>}
-          </header>
-          <ArticleBody rendered={rendered} />
+          <ArticleBody
+            rendered={rendered}
+            header={
+              <header className="post-header">
+                <h1>{post.head.title}</h1>
+                <p className="byline">By {post.author.name}</p>
+                {post.head.excerpt === '' ? null : (
+                  <p className="post-excerpt">{post.head.excerpt}</p>
+                )}
+              </header>
+            }
+          />
         </article>
       </main>
     </div>

@@ -15,6 +15,10 @@ import type { NextConfig } from 'next';
  * is not in `transpilePackages`. Only its browser entry point is reachable from a
  * client component: `@cms/shared/server` is imported in files that start with
  * `import 'server-only'`, and the build fails if a client component reaches one.
+ *
+ * `agentRules: false`: since 16.4, `next dev` writes an `AGENTS.md` beside this
+ * file on every start. The repo documents itself in its README; a generated
+ * file that reappears after every delete would be committed by accident.
  */
 import { fileURLToPath } from 'node:url';
 
@@ -25,6 +29,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: root,
   reactStrictMode: true,
   poweredByHeader: false,
+  agentRules: false,
   turbopack: { root },
 };
 

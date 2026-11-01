@@ -31,15 +31,21 @@ const theme = EditorView.theme({
   '&': {
     color: 'var(--text)',
     backgroundColor: 'var(--surface)',
-    border: '1px solid var(--border)',
+    border: '1px solid var(--rule)',
+    borderRadius: 'var(--radius)',
     minHeight: '24rem',
+    // Fixed on a wide screen (globals.css --editor-height), so the line being
+    // written, the save bar and the preview stay in one viewport; the
+    // document scrolls inside. Auto on a phone, where the page scrolls.
+    height: 'var(--editor-height)',
   },
+  '.cm-scroller': { overflow: 'auto' },
   '&.cm-focused': { outline: '2px solid var(--accent)', outlineOffset: '2px' },
   '.cm-content': { fontFamily: 'var(--font-mono)', caretColor: 'var(--text)', padding: '0.5rem 0' },
   '.cm-gutters': {
     backgroundColor: 'var(--surface)',
     color: 'var(--muted)',
-    borderRight: '1px solid var(--border)',
+    borderRight: '1px solid var(--rule)',
   },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'transparent' },
   '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--text)' },
@@ -70,6 +76,11 @@ export function useCodeMirror({
         EditorView.lineWrapping,
         theme,
         EditorView.contentAttributes.of({
+          // The editable surface is already in the tab order; saying so
+          // explicitly lets axe see that the scroller (which scrolls on a wide
+          // screen, --editor-height) holds focusable content
+          // (scrollable-region-focusable). No extra tab stop is added.
+          tabindex: '0',
           'aria-label': label,
           ...(describedBy === undefined ? {} : { 'aria-describedby': describedBy }),
         }),

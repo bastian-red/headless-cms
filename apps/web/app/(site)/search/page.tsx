@@ -2,6 +2,7 @@ import { SEARCH_QUERY_MAX } from '@cms/shared';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
+import { PostSize } from '../../../components/post-list';
 import { longDate } from '../../../lib/dates';
 import { search } from '../../../lib/content';
 import { alternatesFor, paths } from '../../../lib/seo';
@@ -64,11 +65,12 @@ export default async function SearchPage({ searchParams }: Props) {
           <ol className="post-list" role="list">
             {result.items.map((hit) => (
               <li key={hit.slug} className="post-list-item">
-                <article>
+                <article className="entry">
                   <h3 className="post-list-title">
                     <Link href={paths.post(hit.slug)}>{hit.title}</Link>
                   </h3>
-                  <p className="byline muted">
+                  <PostSize post={hit} />
+                  <p className="byline">
                     <time dateTime={hit.publishedAt}>{longDate(hit.publishedAt)}</time>
                     {' · '}
                     {hit.author.name}

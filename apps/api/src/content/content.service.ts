@@ -8,6 +8,7 @@ import { Injectable } from '@nestjs/common';
 import { searchPublished } from '@cms/search';
 import {
   DomainError,
+  readingMinutes,
   type V1Post,
   type V1PostQuery,
   type V1PostSummary,
@@ -28,6 +29,7 @@ const summarySelect = {
       id: true,
       title: true,
       excerpt: true,
+      words: true,
       createdAt: true,
       tags: { select: { tag: { select: { slug: true, name: true } } } },
     },
@@ -42,6 +44,7 @@ interface SummaryRow {
     id: string;
     title: string;
     excerpt: string;
+    words: number | null;
     createdAt: Date;
     tags: { tag: { slug: string; name: string } }[];
   } | null;
@@ -51,8 +54,12 @@ export type PostLookup =
   | { readonly kind: 'post'; readonly post: V1Post }
   | { readonly kind: 'moved'; readonly slug: string };
 
-/** Only live posts reach here: both dates exist by posts_published_at_check. */
-function summary(row: SummaryRow): V1PostSummary {
+/**
+ * Only live posts reach here: both dates exist by posts_published_at_check.
+ * `words` is the stored count, or the renderer's for a revision written before
+ * the column existed (see `wordsOf`).
+ */
+function summary(row: SummaryRow, words: number): V1PostSummary {
   const published = row.published!;
   return {
     slug: row.slug,
@@ -62,6 +69,8 @@ function summary(row: SummaryRow): V1PostSummary {
     tags: published.tags.map((t) => t.tag).sort((a, b) => a.slug.localeCompare(b.slug)),
     publishedAt: row.publishedAt!.toISOString(),
     revisedAt: published.createdAt.toISOString(),
+    words,
+    readingMinutes: readingMinutes(words),
   };
 }
 
@@ -95,7 +104,11 @@ export class ContentService {
       select: { id: true, ...summarySelect },
     });
     const result = page(rows, query.limit, (r) => ({ at: r.publishedAt!, id: r.id }));
-    return { items: result.items.map(summary), nextCursor: result.nextCursor };
+    const words = await this.wordsOf(result.items);
+    return {
+      items: result.items.map((row, i) => summary(row, words[i]!)),
+      nextCursor: result.nextCursor,
+    };
   }
 
   /**
@@ -125,15 +138,13 @@ export class ContentService {
       return {
         kind: 'post',
         post: {
-          ...summary(row),
+          ...summary(row, rendered.words),
           revisionId: row.published.id,
           seoTitle: row.published.seoTitle,
           seoDescription: row.published.seoDescription,
           body: row.published.body,
           html: rendered.html,
           outline: rendered.outline,
-          words: rendered.words,
-          readingMinutes: rendered.readingMinutes,
         },
       };
     }
@@ -167,11 +178,34 @@ export class ContentService {
       select: summarySelect,
     });
     const byRevision = new Map(rows.map((r) => [r.published?.id, r]));
-    const items = found.hits.flatMap((hit) => {
+    const matched = found.hits.flatMap((hit) => {
       const row = byRevision.get(hit.revisionId);
-      return row === undefined ? [] : [{ ...summary(row), snippet: hit.snippet }];
+      return row === undefined ? [] : [{ row, snippet: hit.snippet }];
     });
+    const words = await this.wordsOf(matched.map((m) => m.row));
+    const items = matched.map((m, i) => ({ ...summary(m.row, words[i]!), snippet: m.snippet }));
     return { query: found.query, total: found.total, items, nextCursor: found.nextCursor };
+  }
+
+  /**
+   * Each row's published word count, in order. Stored on every revision
+   * written since 20261031140000; an older one is rendered once (the render
+   * is cached by revision id, and a revision never changes), so a reader
+   * sees the same number on the list and on the page either way.
+   */
+  private async wordsOf(rows: readonly SummaryRow[]): Promise<number[]> {
+    const missing = rows.flatMap((r) =>
+      r.published !== null && r.published.words === null ? [r.published.id] : [],
+    );
+    const counted = new Map<string, number>();
+    if (missing.length > 0) {
+      const bodies = await this.prisma.client.revision.findMany({
+        where: { id: { in: missing } },
+        select: { id: true, body: true },
+      });
+      for (const b of bodies) counted.set(b.id, (await this.markdown.render(b.id, b.body)).words);
+    }
+    return rows.map((r) => r.published!.words ?? counted.get(r.published!.id)!);
   }
 
   /** Tags carried by at least one live post's published revision. */

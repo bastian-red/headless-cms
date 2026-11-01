@@ -9,7 +9,6 @@ import { Comments } from '../../../../components/comments';
 import { JsonLd } from '../../../../components/json-ld';
 import { PostByline } from '../../../../components/post-list';
 import { appBaseUrl, contentAtBuild } from '../../../../lib/config';
-import { longDate } from '../../../../lib/dates';
 import { submitComment } from '../../../../lib/comment-action';
 import { allPosts, approvedComments, postBySlug } from '../../../../lib/content';
 import {
@@ -94,7 +93,7 @@ export default async function PostPage({ params }: Props) {
   // headline is the article's own title; the SEO title is for <title> and cards.
   const facts = { ...post, description: describe(post.seoDescription ?? post.excerpt) };
   return (
-    <main id="main" className="page">
+    <main id="main" className="page page-sheet">
       <JsonLd
         data={blogPosting(
           appBaseUrl,
@@ -121,21 +120,15 @@ export default async function PostPage({ params }: Props) {
         </ol>
       </nav>
       <article className="post">
-        <header className="post-header">
-          <h1>{post.title}</h1>
-          <PostByline post={post} />
-          <p className="muted">
-            {String(post.readingMinutes)} min read · {post.words.toLocaleString('en')} words
-            {/* revisedAt is when the shown revision was written, which can
-                precede the first publish; only a later one is a revision. */}
-            {post.revisedAt > post.publishedAt ? (
-              <>
-                {' · '}revised <time dateTime={post.revisedAt}>{longDate(post.revisedAt)}</time>
-              </>
-            ) : null}
-          </p>
-        </header>
-        <ArticleBody rendered={rendered} />
+        <ArticleBody
+          rendered={rendered}
+          header={
+            <header className="post-header">
+              <h1>{post.title}</h1>
+              <PostByline post={post} revised />
+            </header>
+          }
+        />
       </article>
       <section className="comments" aria-labelledby="comments-title">
         <Comments comments={comments} />

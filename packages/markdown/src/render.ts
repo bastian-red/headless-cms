@@ -20,7 +20,7 @@
  * 6. `findUnsafe()` (audit.ts) walks the result independently. A finding
  *    throws: a broken sanitizer costs a render, never a reader.
  */
-import { slugify } from '@cms/shared';
+import { readingMinutes, slugify } from '@cms/shared';
 import type { Element, Root } from 'hast';
 import { toHtml } from 'hast-util-to-html';
 import { toText } from 'hast-util-to-text';
@@ -62,7 +62,7 @@ export interface Rendered {
   readonly readingMinutes: number;
 }
 
-export const WORDS_PER_MINUTE = 230;
+export { WORDS_PER_MINUTE } from '@cms/shared';
 
 /** If the author used `#`, shift every heading down one level (capped at 6). */
 function demoteHeadings() {
@@ -188,7 +188,7 @@ export function render(markdown: string, options: RenderOptions = {}): Rendered 
     outline,
     text,
     words,
-    readingMinutes: Math.max(1, Math.round(words / WORDS_PER_MINUTE)),
+    readingMinutes: readingMinutes(words),
   };
 }
 

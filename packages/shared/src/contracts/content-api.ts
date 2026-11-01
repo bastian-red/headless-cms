@@ -31,6 +31,10 @@ export const v1PostSummarySchema = z.object({
   publishedAt: instantSchema,
   /** When the revision readers see was written. */
   revisedAt: instantSchema,
+  /** Words a reader reads in the published revision (the rendered text, not the markdown). */
+  words: z.number().int().nonnegative(),
+  /** `readingMinutes(words)`: what a list shows so a reader can choose by length. */
+  readingMinutes: z.number().int().positive(),
 });
 export type V1PostSummary = z.infer<typeof v1PostSummarySchema>;
 
@@ -50,8 +54,6 @@ export const v1PostSchema = v1PostSummarySchema.extend({
   /** The same body through @cms/markdown: sanitized, audited, relative URLs. */
   html: z.string(),
   outline: z.array(v1OutlineEntrySchema),
-  words: z.number().int().nonnegative(),
-  readingMinutes: z.number().int().positive(),
 });
 export type V1Post = z.infer<typeof v1PostSchema>;
 

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { LIMITS, SLUG_PATTERN, slugify, slugSchema } from './content';
+import {
+  LIMITS,
+  readingMinutes,
+  SLUG_PATTERN,
+  slugify,
+  slugSchema,
+  WORDS_PER_MINUTE,
+} from './content';
 
 describe('slugSchema', () => {
   it.each(['rendering', 'rendering-at-the-edge', 'web-vitals-2026', 'a'])('accepts %s', (slug) => {
@@ -66,5 +73,19 @@ describe('slugify', () => {
       const slug = slugify(title);
       expect(slug === null || slugSchema.safeParse(slug).success).toBe(true);
     }
+  });
+});
+
+describe('readingMinutes', () => {
+  // Run with Math.max(1, Math.round(w / 230)) before being typed here.
+  it.each([
+    [0, 1],
+    [114, 1],
+    [344, 1],
+    [345, 2],
+    [3451, 15],
+  ])('%i words read in %i min', (words, minutes) => {
+    expect(readingMinutes(words)).toBe(minutes);
+    expect(WORDS_PER_MINUTE).toBe(230);
   });
 });

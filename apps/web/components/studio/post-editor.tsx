@@ -378,20 +378,19 @@ export function PostEditor({ post, tags, aside }: Props) {
           >
             <h3 className="editor-pane-title">Preview</h3>
             <article className="post editor-preview-article">
-              <h1 className="editor-preview-title">{values.title || 'Untitled'}</h1>
               {preview.ok ? (
-                <>
-                  <p className="muted">
-                    {String(preview.rendered.readingMinutes)} min read ·{' '}
-                    {preview.rendered.words.toLocaleString('en')} words
-                  </p>
-                  <ArticleBody rendered={preview.rendered} />
-                </>
+                <ArticleBody
+                  rendered={preview.rendered}
+                  header={<h1 className="editor-preview-title">{values.title || 'Untitled'}</h1>}
+                />
               ) : (
-                <p className="form-error">
-                  <span aria-hidden="true">⚠ </span>
-                  This text cannot be rendered safely. Saving it will be refused.
-                </p>
+                <>
+                  <h1 className="editor-preview-title">{values.title || 'Untitled'}</h1>
+                  <p className="form-error">
+                    <span aria-hidden="true">⚠ </span>
+                    This text cannot be rendered safely. Saving it will be refused.
+                  </p>
+                </>
               )}
             </article>
           </section>

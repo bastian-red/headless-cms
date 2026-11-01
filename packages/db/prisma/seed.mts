@@ -197,6 +197,8 @@ async function seedContent(prisma: PrismaClient, people: Record<Person, string>)
           data: { id: postId, slug: post.slug, authorId, createdAt: revisions[0]!.createdAt },
         });
         for (const [i, revision] of revisions.entries()) {
+          // In-process here: these bodies are the renderer's own test corpus.
+          const rendered = render(revision.body);
           await tx.revision.create({
             data: {
               id: ids[i]!,
@@ -207,6 +209,7 @@ async function seedContent(prisma: PrismaClient, people: Record<Person, string>)
               title: revision.title,
               excerpt: revision.excerpt,
               body: revision.body,
+              words: rendered.words,
               seoTitle: revision.seoTitle,
               seoDescription: revision.seoDescription,
               createdAt: revision.createdAt,
@@ -214,10 +217,9 @@ async function seedContent(prisma: PrismaClient, people: Record<Person, string>)
             },
           });
           // As the API does on every save: the reader-visible text, indexed.
-          // In-process here: these bodies are the renderer's own test corpus.
           await tx.searchDocument.create({
             data: {
-              ...searchDocument(ids[i]!, { ...revision, text: render(revision.body).text }),
+              ...searchDocument(ids[i]!, { ...revision, text: rendered.text }),
               createdAt: revision.createdAt,
             },
           });
