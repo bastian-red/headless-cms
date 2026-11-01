@@ -321,13 +321,33 @@ async function main() {
     }
 
     // The index has to be usable at all: a selective query must go through it.
+    // The word is the live corpus's rarest (148 of 2,000 live posts in this
+    // corpus), read from ts_stat, never a fixed position in the vocabulary:
+    // `words[words.length - 40]` was "type", in 1,277 of 2,000 live posts,
+    // where a sequential scan is the right plan, and a fresh CI database
+    // failed the check for planning correctly.
+    const [rare] = await db.$queryRawUnsafe(
+      `SELECT word, ndoc FROM ts_stat('SELECT vector FROM search_documents WHERE live')
+       ORDER BY ndoc, word LIMIT 1`,
+    );
+    if (rare === undefined) {
+      console.error('search-bench: the live corpus has no words.');
+      return 2;
+    }
     const plan = await db.$queryRawUnsafe(
       `EXPLAIN (FORMAT JSON) SELECT revision_id FROM search_documents
-       WHERE live AND vector @@ websearch_to_tsquery('english'::regconfig, $1)`,
-      words[words.length - 40],
+       WHERE live AND vector @@ to_tsquery('english'::regconfig, $1)`,
+      rare.word,
     );
-    const shapes = queries(await contentWords(db, words), posts);
     const indexUsed = JSON.stringify(plan).includes(SEARCH_VECTOR_INDEX);
+    if (!indexUsed) {
+      // Say which query and which plan, so a red run can be read, not guessed.
+      console.error(
+        `search-bench: the selective query for "${String(rare.word)}" (${String(rare.ndoc)} live documents) planned as`,
+        JSON.stringify(plan),
+      );
+    }
+    const shapes = queries(await contentWords(db, words), posts);
 
     const results = [];
     for (const { kind, q } of shapes) {
