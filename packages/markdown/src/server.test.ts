@@ -23,6 +23,17 @@ const longRead = readFileSync(
   'utf8',
 );
 
+/**
+ * A body the parser takes super-linear time on. Measured on the dev machine
+ * (render() in-process): 4,000 pairs 7.0 s, 8,000 pairs 30.9 s, 16,000 pairs
+ * 164 s. CI runners are several times faster, and 4,000 pairs once rendered
+ * inside the 1,500 ms deadline there (run 41260079854), so the margin this
+ * file promises came from the dev machine's load, not the input. 16,000 pairs
+ * keeps every deadline below at least 10x over on a runner five times faster.
+ * It costs nothing extra: each check is killed at its deadline.
+ */
+const slow = `${'*_'.repeat(16_000)}a${'_*'.repeat(16_000)}`;
+
 const hostile = readFileSync(
   new URL('../../db/prisma/content/posts/we-never-render-raw-html.md', import.meta.url),
   'utf8',
@@ -103,18 +114,16 @@ describe('checkRenderable', () => {
   });
 
   it('runs checks side by side without one stalling another', async () => {
-    const [slow, fast] = await Promise.all([
-      checkRenderable(`${'*_'.repeat(4000)}a${'_*'.repeat(4000)}`, { timeoutMs: 800 }),
+    const [stopped, fast] = await Promise.all([
+      checkRenderable(slow, { timeoutMs: 800 }),
       checkRenderable('## Fine\n\nA short body.'),
     ]);
-    expect(slow).toMatchObject({ ok: false, reason: 'timeout' });
+    expect(stopped).toMatchObject({ ok: false, reason: 'timeout' });
     expect(fast).toMatchObject({ ok: true, words: 4 });
   });
 });
 
 describe('RenderChecker, the long-lived one a server keeps', () => {
-  const slow = `${'*_'.repeat(4000)}a${'_*'.repeat(4000)}`;
-
   it('pays thread start-up once, not per check', async () => {
     const checker = new RenderChecker();
     try {
@@ -165,8 +174,6 @@ describe('RenderChecker, the long-lived one a server keeps', () => {
 });
 
 describe('RenderPool, what the API keeps', () => {
-  const slow = `${'*_'.repeat(4000)}a${'_*'.repeat(4000)}`;
-
   /** A pool with every worker started, so start-up is not part of what is timed. */
   async function warmPool(size: number) {
     const pool = new RenderPool(size);
